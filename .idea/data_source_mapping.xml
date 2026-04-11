@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query.sql" value="e4e15232-42d6-46a4-9f77-b51a1c0b4375" />
+    <file url="file://$PROJECT_DIR$/mysql_arkana_setup.sql" value="e4e15232-42d6-46a4-9f77-b51a1c0b4375" />
+  </component>
+</project>
