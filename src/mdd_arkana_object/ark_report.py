@@ -9,14 +9,14 @@ class ArkanaReport(Arkana_Object_Interface):
     """
     ArkanaReport represents a report object in Arkana.
 
-    Loads its specific fields from the `arkana_dashboard_header` table.
+    Loads its specific fields from the `arkana_report_header` table.
     """
 
     arkana_type: str = "report"
     arkana_group: int | None = None
     # Deprecated: JSON content is no longer persisted in DB. Kept for in-memory use only.
     content_json: dict | list | None = None
-    # In-memory representation of dashboard cells; persisted in save()
+    # In-memory representation of report cells; persisted in save()
     # Each item: {"cell_id"?: int, "order_id": int, "cell_key": str, "cell_type": str, "taggs": str | None, "content": Any}
     cells: list[dict] | None = None
 
@@ -53,8 +53,8 @@ class ArkanaReport(Arkana_Object_Interface):
     def load(self):
         """
         Load ArkBoard specific values from DB by `arkana_id` using a single SELECT.
-        - Loads `arkana_group` from `arkana_dashboard_header` and all dashboard cells
-          from `arkana_dashboard_cells` via LEFT JOIN in one query.
+        - Loads `arkana_group` from `arkana_report_header` and all report cells
+          from `arkana_report_cells` via LEFT JOIN in one query.
         """
         if self.arkana_id is None:
             return self
@@ -211,10 +211,10 @@ class ArkanaReport(Arkana_Object_Interface):
 
         Behavior:
         - Calls super().save() to ensure base `arkana_object` row exists and is up-to-date.
-        - Upserts record in `arkana_dashboard_header` with fields:
+        - Upserts record in `arkana_report_header` with fields:
             - arkana_id (PK, FK to arkana_object)
             - arkana_group (nullable)
-        - Replaces dashboard cells in `arkana_dashboard_cells` for this object id using the
+        - Replaces report cells in `arkana_report_cells` for this object id using the
           in-memory `self.cells` list.
         - Returns self for chaining.
         """
@@ -334,10 +334,10 @@ class ArkanaReport(Arkana_Object_Interface):
 
         return self
 
-    # --------- Dashboard cells management ---------
+    # --------- report cells management ---------
     def reset_cells(self):
         """
-        Clear in-memory dashboard cells for this board.
+        Clear in-memory report cells for this board.
         Persistence will occur on the next `save()` call.
         Returns self for chaining.
         """
@@ -457,7 +457,7 @@ class ArkanaReport(Arkana_Object_Interface):
 
     def add_cell(self, index: int, cell: dict | None = None, **kwargs):
         """
-        Add a dashboard cell at the given position (1-based order).
+        Add a report cell at the given position (1-based order).
 
         Requirements from issue:
         - Caller may provide all necessary fields EXCEPT `order_id` and `cell_id` (these are controlled by the system).

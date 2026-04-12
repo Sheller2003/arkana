@@ -52,6 +52,30 @@ git pull
 docker compose up -d --build
 ```
 
+## GitHub Pipeline
+
+Es gibt eine GitHub-Action unter [`.github/workflows/deploy.yml`](/Users/sheller2003/PycharmProjects/arkanaMDD/.github/workflows/deploy.yml:1).
+
+Sie macht bei Push auf `main`:
+
+```bash
+rsync -> Server
+docker compose up -d --build
+```
+
+Benötigte GitHub-Secrets:
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_PATH`
+- `DEPLOY_SSH_KEY`
+
+Wichtig:
+
+- `.env` wird bewusst nicht aus Git synchronisiert und muss bereits auf dem Server liegen
+- `arkana_spheres/` und `keyring_data/` bleiben auf dem Server persistent und werden nicht überschrieben
+
 ## Dateien und Sessions
 
 - persistenter Workspace: `./arkana_spheres`
