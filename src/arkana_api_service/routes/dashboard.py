@@ -10,16 +10,16 @@ from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_mdd_db.config import load_env
 from src.arkana_mdd_db.models import DashboardCellRequest, DashboardCreateRequest
 from src.arkana_sphere.arkana_session_manager import ArkanaSessionManager
-from src.mdd_arkana_object.ark_board import ArkBoard
+from src.mdd_arkana_object.ark_report import ArkanaReport
 from src.mdd_arkana_object.arkana_object_manager import ArkanaObjectManager
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(tags=["report"])
 
 
 def _delete_arkana_object(arkana_id: int) -> None:
-    _, cursor = ArkBoard()._ensure_cursor()
+    _, cursor = ArkanaReport()._ensure_cursor()
     cursor.execute("DELETE FROM arkana_object WHERE arkana_id = %s", (int(arkana_id),))
-    ArkBoard._commit()
+    ArkanaReport._commit()
 
 
 def _get_root_path() -> str:
@@ -32,7 +32,7 @@ def _normalize_cell_for_api(arkana_id: int, cell: dict[str, object]) -> dict[str
     if str(normalized.get("cell_type") or "").lower() == "file":
         content = str(normalized.get("content") or "").strip()
         if content and not content.startswith("http://") and not content.startswith("https://"):
-            normalized["content"] = f"{_get_root_path()}/dashboard/{arkana_id}/files/{content}"
+            normalized["content"] = f"{_get_root_path()}/report/{arkana_id}/files/{content}"
     child_cells = normalized.get("cells")
     if isinstance(child_cells, list):
         normalized["cells"] = [
@@ -43,7 +43,7 @@ def _normalize_cell_for_api(arkana_id: int, cell: dict[str, object]) -> dict[str
     return normalized
 
 
-@router.get("/dashboard/{arkana_id}")
+@router.get("/report/{arkana_id}")
 def get_dashboard(
     arkana_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
@@ -66,7 +66,7 @@ def get_dashboard(
     return _normalize_cell_for_api(arkana_id, dashboard.to_json())
 
 
-@router.post("/dashboard")
+@router.post("/report")
 def create_dashboard(
     request: DashboardCreateRequest,
     current_user: ArkanaUser = Depends(get_current_user),
@@ -75,8 +75,8 @@ def create_dashboard(
     if not current_user.check_user_group_allowed(auth_group):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Arkana object not allowed")
 
-    board = ArkBoard(
-        arkana_type="board",
+    board = ArkanaReport(
+        arkana_type="report",
         auth_group=auth_group,
         object_key=request.object_key,
         description=request.description,
@@ -99,7 +99,7 @@ def create_dashboard(
     return _normalize_cell_for_api(int(board.arkana_id), board.to_json())
 
 
-def _load_dashboard(current_user: ArkanaUser, arkana_id: int) -> ArkBoard:
+def _load_dashboard(current_user: ArkanaUser, arkana_id: int) -> ArkanaReport:
     manager = ArkanaObjectManager(current_user)
     try:
         dashboard = manager.get_object(arkana_id).load()
@@ -116,8 +116,8 @@ def _load_dashboard(current_user: ArkanaUser, arkana_id: int) -> ArkBoard:
             detail=f"Database unavailable: {exc}",
         ) from exc
 
-    if not isinstance(dashboard, ArkBoard):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Object is not a dashboard")
+    if not isinstance(dashboard, ArkanaReport):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Object is not a report")
     return dashboard
 
 
@@ -157,7 +157,7 @@ def _cell_get_response(cell: dict[str, object]):
     return cell
 
 
-@router.get("/dashboard/{arkana_id}/cell/{cell_identifier}")
+@router.get("/report/{arkana_id}/cell/{cell_identifier}")
 def get_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,
@@ -176,8 +176,8 @@ def get_dashboard_cell(
     return _normalize_cell_for_api(arkana_id, cell)
 
 
-@router.get("/dashboard/{arkana_id}/cell")
-@router.get("/dashboard/{arkana_id}/cell/")
+@router.get("/report/{arkana_id}/cell")
+@router.get("/report/{arkana_id}/cell/")
 def get_dashboard_cell_by_id(
     arkana_id: int,
     cell_id: int = Query(..., ge=1),
@@ -190,7 +190,7 @@ def get_dashboard_cell_by_id(
     return _normalize_cell_for_api(arkana_id, cell)
 
 
-@router.get("/dashboard/{arkana_id}/cell/get")
+@router.get("/report/{arkana_id}/cell/get")
 def get_dashboard_cell_content_by_id(
     arkana_id: int,
     cell_id: int = Query(..., ge=1),
@@ -203,7 +203,7 @@ def get_dashboard_cell_content_by_id(
     return _cell_get_response(_normalize_cell_for_api(arkana_id, cell))
 
 
-@router.get("/dashboard/{arkana_id}/cell/{cell_identifier}/get")
+@router.get("/report/{arkana_id}/cell/{cell_identifier}/get")
 def get_dashboard_cell_content(
     arkana_id: int,
     cell_identifier: str,
@@ -216,7 +216,7 @@ def get_dashboard_cell_content(
     return _cell_get_response(_normalize_cell_for_api(arkana_id, cell))
 
 
-@router.get("/dashboard/{arkana_id}/files")
+@router.get("/report/{arkana_id}/files")
 def get_dashboard_files(
     arkana_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
@@ -232,14 +232,14 @@ def get_dashboard_files(
     file_entries = [
         {
             "file_name": file_info["file_name"],
-            "file_url": f"{root_path}/dashboard/{arkana_id}/files/{file_info['file_name']}",
+            "file_url": f"{root_path}/report/{arkana_id}/files/{file_info['file_name']}",
         }
         for file_info in files
     ]
     return {"arkana_object_id": arkana_id, "files": file_entries}
 
 
-@router.get("/dashboard/{arkana_id}/files/{file_name}")
+@router.get("/report/{arkana_id}/files/{file_name}")
 def get_dashboard_file(
     arkana_id: int,
     file_name: str,
@@ -258,7 +258,7 @@ def get_dashboard_file(
     return FileResponse(path=file_info["absolute_path"], filename=file_info["file_name"])
 
 
-@router.put("/dashboard/{arkana_id}/cell/{cell_identifier}")
+@router.put("/report/{arkana_id}/cell/{cell_identifier}")
 def update_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,
@@ -276,7 +276,7 @@ def update_dashboard_cell(
     return _normalize_cell_for_api(arkana_id, result_cell)
 
 
-@router.delete("/dashboard/{arkana_id}/cell/{cell_identifier}")
+@router.delete("/report/{arkana_id}/cell/{cell_identifier}")
 def delete_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,
@@ -290,7 +290,7 @@ def delete_dashboard_cell(
     return {"status": "deleted", "cell": cell}
 
 
-@router.delete("/dashboard/{arkana_id}")
+@router.delete("/report/{arkana_id}")
 def delete_dashboard(
     arkana_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
@@ -311,7 +311,7 @@ def delete_dashboard(
     }
 
 
-@router.post("/dashboard/{arkana_id}/cell/")
+@router.post("/report/{arkana_id}/cell/")
 def create_dashboard_cell(
     arkana_id: int,
     request: DashboardCellRequest,
@@ -338,7 +338,7 @@ def create_dashboard_cell(
     return _normalize_cell_for_api(arkana_id, dashboard.get_cell(created_cell.get("cell_key")) or created_cell)
 
 
-@router.post("/dashboard/{arkana_id}/run")
+@router.post("/report/{arkana_id}/run")
 def run_dashboard_cells(
     arkana_id: int,
     save: bool = Query(default=True),
@@ -393,8 +393,8 @@ def _run_dashboard_cell(
     }
 
 
-@router.get("/dashboard/{arkana_id}/cell/{cell_identifier}/run")
-@router.get("/dashboard/{arkana_id}/cell/{cell_identifier}run")
+@router.get("/report/{arkana_id}/cell/{cell_identifier}/run")
+@router.get("/report/{arkana_id}/cell/{cell_identifier}run")
 def get_run_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,
@@ -403,8 +403,8 @@ def get_run_dashboard_cell(
     return _run_dashboard_cell(arkana_id, cell_identifier, False, current_user)
 
 
-@router.post("/dashboard/{arkana_id}/cell/{cell_identifier}/run")
-@router.post("/dashboard/{arkana_id}/cell/{cell_identifier}run")
+@router.post("/report/{arkana_id}/cell/{cell_identifier}/run")
+@router.post("/report/{arkana_id}/cell/{cell_identifier}run")
 def post_run_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,

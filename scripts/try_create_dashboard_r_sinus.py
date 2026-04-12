@@ -94,11 +94,11 @@ def main() -> None:
         ],
     }
 
-    created_board = _request("POST", "/dashboard", create_payload)
+    created_board = _request("POST", "/report", create_payload)
     arkana_id = int(created_board["arkana_id"])
 
-    run_result = _request("POST", f"/dashboard/{arkana_id}/cell/sinus_r/run?save=true")
-    files_result = _request("GET", f"/dashboard/{arkana_id}/files")
+    run_result = _request("POST", f"/report/{arkana_id}/cell/sinus_r/run?save=true")
+    files_result = _request("GET", f"/report/{arkana_id}/files")
 
     print("created_board:")
     print(json.dumps(created_board, indent=2))

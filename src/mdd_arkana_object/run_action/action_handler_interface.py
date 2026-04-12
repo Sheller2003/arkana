@@ -91,7 +91,7 @@ class ActionHandlerInterface:
     def _build_file_url(self, file_name: str) -> str:
         load_env()
         root_path = os.getenv("ROOT_PATH", "http://127.0.0.1:8000").rstrip("/")
-        return f"{root_path}/dashboard/{self.get_arkana_id()}/files/{file_name}"
+        return f"{root_path}/report/{self.get_arkana_id()}/files/{file_name}"
 
 
 class UnsupportedActionHandler(ActionHandlerInterface):
@@ -126,7 +126,6 @@ def build_action_handler(
     if normalized == CellType.R_CODE.value:
         return ActionHandlerR(assigned_to_arkana_id, field_id, field_value, running_id, user_object)
     return UnsupportedActionHandler(assigned_to_arkana_id, field_id, field_value, running_id, user_object)
-
 
 
 

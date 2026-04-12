@@ -1,5 +1,5 @@
 from src.mdd_arkana_object.ark_obj_interface import Arkana_Object_Interface
-from src.mdd_arkana_object.ark_board import ArkBoard
+from src.mdd_arkana_object.ark_report import ArkanaReport
 from src.mdd_arkana_object.db_connection import ArkanaObjectDBConnection
 
 from src.arkana_mdd_db.config import get_main_db_config
@@ -18,7 +18,8 @@ class ArkanaObjectManager():
 
         ark_type = str(d_object.get("arkana_type", "")).lower()
         cls_map = {
-            "board": ArkBoard,
+            "board": ArkanaReport,
+            "report": ArkanaReport,
         }
         obj_cls = cls_map.get(ark_type, Arkana_Object_Interface)
         # Pass fields as kwargs; interface will pick relevant ones

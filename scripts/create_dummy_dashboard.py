@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 """
-Seed script (no direct SQL): create dummy dashboards that behave like a Jupyter Notebook
-using ArkBoard object APIs only. Idempotent.
+Seed script (no direct SQL): create dummy reports that behave like a Jupyter Notebook
+using ArkanaReport object APIs only. Idempotent.
 
-What this script does via ArkBoard:
-- Ensures 3 demo dashboards exist with:
-  - arkana_object (arkana_type='board', auth_group=0, modeling_db=0)
+What this script does via ArkanaReport:
+- Ensures 3 demo reports exist with:
+  - arkana_object (arkana_type='report', auth_group=0, modeling_db=0)
   - arkana_dashboard_header (arkana_group=0)
 - Replaces ordered cells using ArkBoard.reset_cells() and ArkBoard.append_cell(...)
   to mimic notebook cells (markdown → code → output, etc.).
@@ -20,7 +20,7 @@ Notes:
 from dataclasses import dataclass
 from typing import Iterable, TypedDict
 
-from src.mdd_arkana_object.ark_board import ArkBoard
+from src.mdd_arkana_object.ark_report import ArkanaReport
 
 
 @dataclass(frozen=True)
@@ -110,8 +110,8 @@ def _build_cells() -> list[tuple[str, dict]]:
     ]
 
 
-def _seed_notebook_cells_obj(board: ArkBoard) -> int:
-    """Replace all cells for a board using ArkBoard API only. Returns inserted count."""
+def _seed_notebook_cells_obj(board: ArkanaReport) -> int:
+    """Replace all cells for a report using ArkanaReport API only. Returns inserted count."""
     cells = _build_cells()
     board.reset_cells()
     inserted = 0
@@ -125,9 +125,9 @@ def create_boards(specs: Iterable[DummyBoardSpec]) -> list[CreatedBoard]:
     created: list[CreatedBoard] = []
 
     for spec in specs:
-        # Resolve or create board via ArkBoard API (no raw SQL here)
-        board = ArkBoard(
-            arkana_type="board",
+        # Resolve or create report via ArkanaReport API (no raw SQL here)
+        board = ArkanaReport(
+            arkana_type="report",
             object_key=spec.key,
             description=spec.description,
             auth_group=0,
@@ -155,7 +155,7 @@ def create_boards(specs: Iterable[DummyBoardSpec]) -> list[CreatedBoard]:
             CreatedBoard(
                 arkana_id=int(board.arkana_id or 0),
                 object_key=spec.key,
-                arkana_type="board",
+                arkana_type="report",
                 auth_group=board.auth_group,
                 modeling_db=board.modeling_db,
                 arkana_group=board.arkana_group,
@@ -176,7 +176,7 @@ def main() -> None:
     boards = create_boards(specs)
     for data in boards:
         print(
-            f"Created ArkBoard: id={data.get('arkana_id')} key={data.get('object_key')} "
+            f"Created ArkanaReport: id={data.get('arkana_id')} key={data.get('object_key')} "
             f"type={data.get('arkana_type')} auth_group={data.get('auth_group')} "
             f"modeling_db={data.get('modeling_db')} arkana_group={data.get('arkana_group')}"
         )
