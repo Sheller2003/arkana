@@ -10,10 +10,11 @@ services:
     environment:
       ARKANA_API_HOST: 0.0.0.0
       ARKANA_API_PORT: 8000
+      ARKANA_SESSIONS_ROOT: ${ARKANA_SESSIONS_ROOT:-/app/arkana_spheres}
     ports:
       - "${ARKANA_API_PORT:-8000}:8000"
     volumes:
-      - ./arkana_spheres:/app/arkana_spheres
+      - ${ARKANA_SESSIONS_ROOT:-./arkana_spheres}:${ARKANA_SESSIONS_ROOT:-/app/arkana_spheres}
       - ./keyring_data:/app/.local/share/python_keyring
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:

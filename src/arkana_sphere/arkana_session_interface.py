@@ -20,6 +20,13 @@ SESSIONS_ROOT_FOLDER = "arkana_spheres"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _resolve_sessions_root() -> Path:
+    configured = os.getenv("ARKANA_SESSIONS_ROOT")
+    if configured:
+        return Path(configured)
+    return PROJECT_ROOT / SESSIONS_ROOT_FOLDER
+
+
 class ArkanaSessionInterface:
     language = "generic"
     docker_image = ""
@@ -38,7 +45,7 @@ class ArkanaSessionInterface:
         self.session_id = session_id or self._build_session_id()
         self.lifetime_seconds = max(int(lifetime_seconds), 1)
 
-        self.base_path = PROJECT_ROOT / SESSIONS_ROOT_FOLDER
+        self.base_path = _resolve_sessions_root()
         self.session_path = self.base_path / self.session_id
         self.workspace_root_path = self.base_path / "workspaces"
         self.workspace_path = self.workspace_root_path / self.workspace_key

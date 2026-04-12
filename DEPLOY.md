@@ -8,6 +8,7 @@ Dieses Projekt kann als API-Container deployed werden. Die Sandbox-Sessions lauf
 - erreichbare MySQL-Datenbank
 - `.env` im Projektordner
 - API-Basic-Auth-Passwort in `.env`, wenn kein Keyring im Container vorhanden ist
+- `ARKANA_SESSIONS_ROOT` in `.env`, z. B. `/opt/arkana/arkana_spheres`
 
 ## Wichtige Architektur
 
@@ -15,6 +16,7 @@ Dieses Projekt kann als API-Container deployed werden. Die Sandbox-Sessions lauf
 - Python- und R-Sessions werden zur Laufzeit vom API-Container aus ueber den Host-Docker-Daemon gestartet
 - dafuer wird `/var/run/docker.sock` in den API-Container gemountet
 - `keyring` speichert Passwoerter im Container dateibasiert und persistent unter `./keyring_data`
+- `ARKANA_SESSIONS_ROOT` muss als absoluter Pfad im Host und im API-Container identisch sein
 
 ## Start
 

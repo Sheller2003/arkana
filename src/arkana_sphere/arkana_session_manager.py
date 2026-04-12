@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SESSIONS_ROOT_FOLDER = "arkana_spheres"
 
 
+def _resolve_sessions_root() -> Path:
+    configured = os.getenv("ARKANA_SESSIONS_ROOT")
+    if configured:
+        return Path(configured)
+    return PROJECT_ROOT / SESSIONS_ROOT_FOLDER
+
+
 class ArkanaSessionManager:
     SESSION_TYPES = {
         "python": ArkanaPythonSandboxSession,
@@ -19,7 +27,7 @@ class ArkanaSessionManager:
     }
 
     def __init__(self):
-        self.base_path = PROJECT_ROOT / SESSIONS_ROOT_FOLDER
+        self.base_path = _resolve_sessions_root()
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def create_session(
