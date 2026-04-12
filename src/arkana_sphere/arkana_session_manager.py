@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -178,6 +179,40 @@ class ArkanaSessionManager:
                 removed.append(session_id)
         return removed
 
+    def delete_object_sessions(self, arkana_object_id) -> list[str]:
+        removed: list[str] = []
+        for session in self.list_sessions():
+            if str(session.get("arkana_object_id")) != str(arkana_object_id):
+                continue
+            runtime_type = str(session.get("runtime_type") or "py")
+            session_id = str(session.get("session_id") or "")
+            user_object = _SessionUserProxy(str(session.get("user_id") or ""))
+            session_cls = self._resolve_session_class(runtime_type)
+            session_obj = session_cls(
+                user_object=user_object,
+                arkana_object_id=arkana_object_id,
+                session_id=session_id,
+            )
+            session_obj.delete_session()
+            removed.append(session_id)
+        return removed
+
+    def delete_object_workspaces(self, arkana_object_id) -> list[str]:
+        removed: list[str] = []
+        workspace_root = self.base_path / "workspaces"
+        if not workspace_root.exists():
+            return removed
+
+        object_slug = self._slug(arkana_object_id)
+        for workspace_path in sorted(workspace_root.iterdir()):
+            if not workspace_path.is_dir():
+                continue
+            if not workspace_path.name.endswith(f"-{object_slug}"):
+                continue
+            shutil.rmtree(workspace_path, ignore_errors=True)
+            removed.append(str(workspace_path))
+        return removed
+
     def _resolve_session_class(self, session_type: str):
         normalized = self._normalize_runtime_type(session_type)
         if normalized not in self.SESSION_TYPES:
@@ -205,6 +240,12 @@ class ArkanaSessionManager:
         import json
 
         return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    def _slug(self, value: Any) -> str:
+        text = str(value).strip().lower()
+        allowed = [char if char.isalnum() else "-" for char in text]
+        slug = "".join(allowed).strip("-")
+        return slug or "unknown"
 
 
 class _SessionUserProxy:

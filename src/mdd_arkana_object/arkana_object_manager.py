@@ -26,6 +26,7 @@ class ArkanaObjectManager():
             raise OSError("Arkana object not allowed")
         db_connection = self.__resolve_object_db_connection(d_object)
         d_object["db_connection"] = db_connection
+        d_object["user_object"] = self.user
         if d_object.get("modeling_db", d_object.get("moddeling_db", 0)) not in (None, 0):
             runtime_connection, runtime_cursor = db_connection.open_cursor()
             d_object["db_runtime_connection"] = runtime_connection

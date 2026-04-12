@@ -1,4 +1,6 @@
 from src.mdd_arkana_object.ark_obj_interface import Arkana_Object_Interface
+from src.mdd_arkana_object.cell_types import CellType
+from src.mdd_arkana_object.run_action.action_handler_interface import build_action_handler
 from src.arkana_mdd_db.config import get_main_db_config
 from src.arkana_mdd_db.main_db import ArkanaMainDB
 
@@ -39,134 +41,63 @@ class ArkBoard(Arkana_Object_Interface):
         if self.arkana_id is None:
             return self
 
-        # Use shared cursor from interface
-        _, cursor = self._ensure_model_cursor()
+        try:
+            _, cursor = self._ensure_model_cursor()
+            if not self._has_table("arkana_dashboard_header"):
+                raise RuntimeError("Required table 'arkana_dashboard_header' not found")
+            if not self._has_table("arkana_dashboard_cells"):
+                raise RuntimeError("Required table 'arkana_dashboard_cells' not found")
 
-        # Ensure required tables exist
-        if not self._has_table("arkana_dashboard_header"):
-            raise RuntimeError("Required table 'arkana_dashboard_header' not found")
-        if not self._has_table("arkana_dashboard_cells"):
-            raise RuntimeError("Required table 'arkana_dashboard_cells' not found")
+            uses_prev = self._has_column("arkana_dashboard_cells", "prev_id")
+            has_content = self._has_column("arkana_dashboard_cells", "content")
+            content_column = (
+                "content"
+                if has_content
+                else ("cell_value" if self._has_column("arkana_dashboard_cells", "cell_value") else None)
+            )
+            order_column = (
+                "order_id"
+                if self._has_column("arkana_dashboard_cells", "order_id")
+                else ("run_order" if self._has_column("arkana_dashboard_cells", "run_order") else None)
+            )
+            has_depend_by = self._has_column("arkana_dashboard_cells", "depend_by")
+            import json
 
-        # Detect legacy/new column variants on the cells table.
-        uses_prev = self._has_column("arkana_dashboard_cells", "prev_id")
-        has_content = self._has_column("arkana_dashboard_cells", "content")
-        content_column = "content" if has_content else ("cell_value" if self._has_column("arkana_dashboard_cells", "cell_value") else None)
-        order_column = "order_id" if self._has_column("arkana_dashboard_cells", "order_id") else ("run_order" if self._has_column("arkana_dashboard_cells", "run_order") else None)
-
-        has_depend_by = self._has_column("arkana_dashboard_cells", "depend_by")
-
-        if uses_prev and order_column is None:
-            # Load header and all cells with prev_id (no ORDER BY; we'll reconstruct by traversal)
+            select_parts = ["h.arkana_group", "c.cell_id"]
+            if order_column is not None:
+                select_parts.append(f"c.{order_column}")
+            if uses_prev:
+                select_parts.append("c.prev_id")
+            select_parts.extend(["c.cell_key", "c.cell_type", "c.taggs"])
             if content_column is not None:
-                query = (
-                    f"SELECT h.arkana_group, c.cell_id, c.prev_id, c.cell_key, c.cell_type, c.taggs, c.{content_column}"
-                    + (", c.depend_by " if has_depend_by else " ")
-                    + "FROM arkana_dashboard_header h "
-                    + "LEFT JOIN arkana_dashboard_cells c ON c.arkana_object_id = h.arkana_id "
-                    + "WHERE h.arkana_id = %s"
-                )
-                cursor.execute(
-                    query,
-                    (int(self.arkana_id),),
-                )
-            else:
-                query = (
-                    "SELECT h.arkana_group, c.cell_id, c.prev_id, c.cell_key, c.cell_type, c.taggs"
-                    + (", c.depend_by " if has_depend_by else " ")
-                    + "FROM arkana_dashboard_header h "
-                    + "LEFT JOIN arkana_dashboard_cells c ON c.arkana_object_id = h.arkana_id "
-                    + "WHERE h.arkana_id = %s"
-                )
-                cursor.execute(
-                    query,
-                    (int(self.arkana_id),),
-                )
+                select_parts.append(f"c.{content_column}")
+            if has_depend_by:
+                select_parts.append("c.depend_by")
+
+            query = (
+                f"SELECT {', '.join(select_parts)} "
+                "FROM arkana_dashboard_header h "
+                "LEFT JOIN arkana_dashboard_cells c ON c.arkana_object_id = h.arkana_id "
+                "WHERE h.arkana_id = %s "
+            )
+            if order_column is not None:
+                if has_depend_by:
+                    query += (
+                        f"ORDER BY c.{order_column}, "
+                        "CASE WHEN c.depend_by IS NULL THEN 0 ELSE 1 END, "
+                        "c.depend_by, c.cell_id"
+                    )
+                else:
+                    query += f"ORDER BY c.{order_column}, c.cell_id"
+
+            cursor.execute(query, (int(self.arkana_id),))
             rows = cursor.fetchall() or []
             self.cells = []
             header_group_set = False
-            # Build lookup maps
-            cells_by_id: dict[int, dict] = {}
-            prev_of: dict[int, int | None] = {}
-            id_set: set[int] = set()
-            import json
             for r in rows:
                 if not header_group_set:
                     self.arkana_group = int(r[0]) if r and r[0] is not None else None
                     header_group_set = True
-                if ((6 if content_column is None else 7) <= len(r)) and r[1] is not None:
-                    cid = int(r[1])
-                    # Treat 0 as head marker as well as NULL
-                    pid = int(r[2]) if r[2] is not None else None
-                    if pid == 0:
-                        pid = None
-                    content_value = None
-                    if content_column is not None and len(r) > 6:
-                        raw = r[6]
-                        try:
-                            if raw is None:
-                                content_value = None
-                            elif content_column == "content" and isinstance(raw, (bytes, bytearray)):
-                                content_value = json.loads(raw.decode("utf-8"))
-                            elif content_column == "content" and isinstance(raw, str):
-                                content_value = json.loads(raw)
-                            else:
-                                content_value = raw
-                        except Exception:
-                            content_value = raw
-                    cell = {
-                        "cell_id": cid,
-                        # order_id will be assigned after traversal
-                        "order_id": None,
-                        "prev_id": pid,
-                        "prev": pid,
-                        "cell_key": str(r[3]) if r[3] is not None else None,
-                        "cell_type": str(r[4]) if r[4] is not None else None,
-                        "taggs": self._taggs_to_storage(r[5]),
-                        "content": content_value,
-                    }
-                    if has_depend_by:
-                        depend_by_idx = 7 if content_column is not None else 6
-                        cell["depend_by"] = int(r[depend_by_idx]) if len(r) > depend_by_idx and r[depend_by_idx] is not None else None
-                    cells_by_id[cid] = cell
-                    prev_of[cid] = pid
-                    id_set.add(cid)
-
-            # Find heads: prev_id is NULL/0 or not present among ids
-            heads: list[int] = []
-            for cid, pid in prev_of.items():
-                if pid is None or pid not in id_set:
-                    heads.append(cid)
-
-            visited: set[int] = set()
-            order_counter = 1
-
-            # Traverse from each head, in stable order
-            for head in sorted(heads):
-                current = head
-                while current is not None and current not in visited and current in cells_by_id:
-                    cell = cells_by_id[current]
-                    cell["order_id"] = order_counter
-                    self.cells.append(cell)
-                    visited.add(current)
-                    order_counter += 1
-                    # Find "next" as the one that has prev_id == current
-                    nxt = None
-                    for cid, pid in prev_of.items():
-                        if cid not in visited and pid == current:
-                            nxt = cid
-                            break
-                    current = nxt
-
-            # Append any remaining (cycle/orphan) cells in deterministic order
-            for cid in sorted(id_set):
-                if cid not in visited:
-                    cell = cells_by_id[cid]
-                    cell["order_id"] = order_counter
-                    self.cells.append(cell)
-                    order_counter += 1
-
-            # If there were no rows at all, still try to fetch header
             if not rows:
                 cursor.execute(
                     "SELECT arkana_group FROM arkana_dashboard_header WHERE arkana_id = %s LIMIT 1",
@@ -176,55 +107,29 @@ class ArkBoard(Arkana_Object_Interface):
                 if row is not None:
                     self.arkana_group = int(row[0]) if row[0] is not None else None
                 self.cells = []
-        else:
-            # Legacy order_id-based loading
-            if content_column is not None:
-                query = (
-                    f"SELECT h.arkana_group, c.cell_id, c.{order_column}, "
-                    + ("c.prev_id, " if uses_prev else "")
-                    + "c.cell_key, c.cell_type, c.taggs, "
-                    + f"c.{content_column}"
-                    + (", c.depend_by " if has_depend_by else " ")
-                    + "FROM arkana_dashboard_header h "
-                    + "LEFT JOIN arkana_dashboard_cells c ON c.arkana_object_id = h.arkana_id "
-                    + "WHERE h.arkana_id = %s "
-                    + f"ORDER BY c.{order_column}"
-                )
-                cursor.execute(
-                    query,
-                    (int(self.arkana_id),),
-                )
             else:
-                query = (
-                    f"SELECT h.arkana_group, c.cell_id, c.{order_column}, "
-                    + ("c.prev_id, " if uses_prev else "")
-                    + "c.cell_key, c.cell_type, c.taggs"
-                    + (", c.depend_by " if has_depend_by else " ")
-                    + "FROM arkana_dashboard_header h "
-                    + "LEFT JOIN arkana_dashboard_cells c ON c.arkana_object_id = h.arkana_id "
-                    + "WHERE h.arkana_id = %s "
-                    + f"ORDER BY c.{order_column}"
-                )
-                cursor.execute(
-                    query,
-                    (int(self.arkana_id),),
-                )
-            rows = cursor.fetchall() or []
-            self.cells = []
-            header_group_set = False
-            import json
-            for r in rows:
-                if not header_group_set:
-                    self.arkana_group = int(r[0]) if r and r[0] is not None else None
-                    header_group_set = True
-                # When there are no fields yet, columns 1..5 can be None
-                min_len = 6 + (1 if uses_prev else 0) + (1 if content_column is not None else 0)
-                if min_len <= len(r) and r[1] is not None:
-                    offset = 1 if uses_prev else 0
+                for r in rows:
+                    if r[1] is None:
+                        continue
+                    index = 2
+                    order_id = None
+                    if order_column is not None:
+                        order_id = int(r[index]) if r[index] is not None else None
+                        index += 1
+                    prev_id = None
+                    if uses_prev:
+                        prev_id = int(r[index]) if r[index] is not None else None
+                        index += 1
+                    cell_key = str(r[index]) if r[index] is not None else None
+                    index += 1
+                    cell_type = str(r[index]) if r[index] is not None else None
+                    index += 1
+                    taggs = self._taggs_to_storage(r[index])
+                    index += 1
                     content_value = None
-                    content_idx = 6 + offset
-                    if content_column is not None and len(r) > content_idx:
-                        raw = r[content_idx]
+                    if content_column is not None:
+                        raw = r[index]
+                        index += 1
                         try:
                             if raw is None:
                                 content_value = None
@@ -236,32 +141,27 @@ class ArkBoard(Arkana_Object_Interface):
                                 content_value = raw
                         except Exception:
                             content_value = raw
+                    depend_by = None
+                    if has_depend_by and len(r) > index and r[index] is not None:
+                        depend_by = int(r[index])
+
                     self.cells.append(
                         {
                             "cell_id": int(r[1]) if r[1] is not None else None,
-                            "order_id": int(r[2]) if r[2] is not None else None,
-                            "prev_id": int(r[3]) if uses_prev and r[3] is not None else None,
-                            "prev": int(r[3]) if uses_prev and r[3] is not None else None,
-                            "cell_key": str(r[3 + offset]) if r[3 + offset] is not None else None,
-                            "cell_type": str(r[4 + offset]) if r[4 + offset] is not None else None,
-                            "taggs": self._taggs_to_storage(r[5 + offset]),
+                            "order_id": order_id,
+                            "prev_id": prev_id,
+                            "prev": prev_id,
+                            "cell_key": cell_key,
+                            "cell_type": cell_type,
+                            "taggs": taggs,
                             "content": content_value,
-                            "depend_by": int(r[content_idx + 1]) if has_depend_by and len(r) > content_idx + 1 and r[content_idx + 1] is not None else None,
+                            "depend_by": depend_by,
                         }
                     )
 
-            # If no rows returned at all (no fields yet), still fetch header once
-            if not rows:
-                cursor.execute(
-                    "SELECT arkana_group FROM arkana_dashboard_header WHERE arkana_id = %s LIMIT 1",
-                    (int(self.arkana_id),),
-                )
-                row = cursor.fetchone()
-                if row is not None:
-                    self.arkana_group = int(row[0]) if row[0] is not None else None
-                self.cells = []
-
-        return self
+            return self
+        finally:
+            self._close_model()
 
     def to_json(self) -> dict:
         # Start with base fields from interface
@@ -269,12 +169,14 @@ class ArkBoard(Arkana_Object_Interface):
         # Ensure known board-specific fields are present
         data["arkana_group"] = self.arkana_group
         if self.cells is not None:
-            data["cells"] = [self._serialize_cell(cell) for cell in self.cells]
+            data["cells"] = self._serialize_cells_for_api(self.cells, include_index=True)
         # Include any other public instance attributes not already captured
         for key, value in self.__dict__.items():
             if key.startswith("_"):
                 continue
             if key == "db_connection":
+                continue
+            if key == "user_object":
                 continue
             if key == "content_json":
                 continue
@@ -307,114 +209,116 @@ class ArkBoard(Arkana_Object_Interface):
             # Could not obtain a valid arkana_id; nothing more to do safely
             return self
 
-        # Use shared cursor/connection
-        _, cursor = self._ensure_model_cursor()
+        try:
+            # Use shared cursor/connection
+            _, cursor = self._ensure_model_cursor()
 
-        # Ensure required tables exist
-        if not self._has_table("arkana_dashboard_header"):
-            raise RuntimeError("Required table 'arkana_dashboard_header' not found")
-        if not self._has_table("arkana_dashboard_cells"):
-            raise RuntimeError("Required table 'arkana_dashboard_cells' not found")
+            # Ensure required tables exist
+            if not self._has_table("arkana_dashboard_header"):
+                raise RuntimeError("Required table 'arkana_dashboard_header' not found")
+            if not self._has_table("arkana_dashboard_cells"):
+                raise RuntimeError("Required table 'arkana_dashboard_cells' not found")
 
-        # Check if a dashboard header row already exists
-        cursor.execute(
-            "SELECT 1 FROM arkana_dashboard_header WHERE arkana_id = %s LIMIT 1",
-            (int(self.arkana_id),),
-        )
-        exists = cursor.fetchone()
-
-        group_val = int(self.arkana_group) if self.arkana_group is not None else None
-
-        if exists is None:
-            # Insert new header row
+            # Check if a dashboard header row already exists
             cursor.execute(
-                "INSERT INTO arkana_dashboard_header (arkana_id, arkana_group) VALUES (%s, %s)",
-                (int(self.arkana_id), group_val),
+                "SELECT 1 FROM arkana_dashboard_header WHERE arkana_id = %s LIMIT 1",
+                (int(self.arkana_id),),
             )
-            self._commit_model()
-        else:
-            # Update existing header row
+            exists = cursor.fetchone()
+
+            group_val = int(self.arkana_group) if self.arkana_group is not None else None
+
+            if exists is None:
+                cursor.execute(
+                    "INSERT INTO arkana_dashboard_header (arkana_id, arkana_group) VALUES (%s, %s)",
+                    (int(self.arkana_id), group_val),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE arkana_dashboard_header SET arkana_group = %s WHERE arkana_id = %s",
+                    (group_val, int(self.arkana_id)),
+                )
+
+            if self.cells is None:
+                self.cells = []
+
             cursor.execute(
-                "UPDATE arkana_dashboard_header SET arkana_group = %s WHERE arkana_id = %s",
-                (group_val, int(self.arkana_id)),
+                "DELETE FROM arkana_dashboard_cells WHERE arkana_object_id = %s",
+                (int(self.arkana_id),),
             )
-            self._commit_model()
 
-        # Persist cells: replace all rows for this object id
-        # Normalize in-memory cells list
-        if self.cells is None:
-            self.cells = []
+            uses_prev = self._has_column("arkana_dashboard_cells", "prev_id")
+            has_content = self._has_column("arkana_dashboard_cells", "content")
+            content_column = "content" if has_content else ("cell_value" if self._has_column("arkana_dashboard_cells", "cell_value") else None)
+            order_column = "order_id" if self._has_column("arkana_dashboard_cells", "order_id") else ("run_order" if self._has_column("arkana_dashboard_cells", "run_order") else None)
+            has_depend_by = self._has_column("arkana_dashboard_cells", "depend_by")
 
-        # Delete existing rows
-        cursor.execute(
-            "DELETE FROM arkana_dashboard_cells WHERE arkana_object_id = %s",
-            (int(self.arkana_id),),
-        )
-
-        uses_prev = self._has_column("arkana_dashboard_cells", "prev_id")
-        has_content = self._has_column("arkana_dashboard_cells", "content")
-        content_column = "content" if has_content else ("cell_value" if self._has_column("arkana_dashboard_cells", "cell_value") else None)
-        order_column = "order_id" if self._has_column("arkana_dashboard_cells", "order_id") else ("run_order" if self._has_column("arkana_dashboard_cells", "run_order") else None)
-        has_depend_by = self._has_column("arkana_dashboard_cells", "depend_by")
-
-        # Insert all cells in order
-        # Requirement: cell_id must be assigned per dashboard separately (no AUTO_INCREMENT expected).
-        # We assign cell_id deterministically from 1..n for this arkana_object_id and align order_id accordingly.
-        order_counter = 1
-        prev_cell_id: int | None = None
-        import json
-        for cell in self.cells:
-            cell_key = cell.get("cell_key") or f"cell_{order_counter}"
-            cell_type = cell.get("cell_type") or "text"
-            tag_str = self._taggs_to_storage(cell.get("taggs"))
-            cell_id_for_board = int(cell.get("cell_id") or order_counter)
-            prev_id_value = cell.get("prev_id", cell.get("prev"))
-            if prev_id_value in (None, ""):
-                prev_id_value = prev_cell_id if prev_cell_id is not None else 0
-            depend_by_value = cell.get("depend_by")
-            content_value = cell.get("content")
-            # Serialize content to JSON if column exists
-            if content_column is not None:
+            order_counter = 1
+            prev_cell_id: int | None = None
+            import json
+            used_cell_keys: set[str] = set()
+            for cell in self.cells:
+                cell_type = cell.get("cell_type") or "text"
+                tag_str = self._taggs_to_storage(cell.get("taggs"))
+                raw_cell_id = cell.get("cell_id")
                 try:
-                    if content_column == "content":
-                        content_serialized = json.dumps(content_value) if content_value is not None else None
-                    else:
+                    normalized_cell_id = int(raw_cell_id) if raw_cell_id is not None else 0
+                except (TypeError, ValueError):
+                    normalized_cell_id = 0
+                cell_id_for_board = normalized_cell_id if normalized_cell_id > 0 else order_counter
+                cell_key = self._ensure_unique_cell_key(cell.get("cell_key"), cell_id_for_board, used_cell_keys)
+                prev_id_value = cell.get("prev_id", cell.get("prev"))
+                if prev_id_value in (None, ""):
+                    prev_id_value = prev_cell_id if prev_cell_id is not None else 0
+                depend_by_value = cell.get("depend_by")
+                content_value = cell.get("content")
+                content_serialized = None
+                if content_column is not None:
+                    try:
+                        if content_column == "content":
+                            content_serialized = json.dumps(content_value) if content_value is not None else None
+                        else:
+                            content_serialized = str(content_value) if content_value is not None else None
+                    except Exception:
                         content_serialized = str(content_value) if content_value is not None else None
-                except Exception:
-                    content_serialized = str(content_value) if content_value is not None else None
 
-            columns = ["cell_id", "arkana_object_id"]
-            values = [int(cell_id_for_board), int(self.arkana_id)]
-            if order_column is not None:
-                columns.append(order_column)
-                values.append(int(order_counter))
-            if uses_prev:
-                columns.append("prev_id")
-                values.append(int(prev_id_value))
-            columns.extend(["cell_key", "cell_type", "taggs"])
-            values.extend([str(cell_key), str(cell_type), tag_str])
-            if content_column is not None:
-                columns.append(content_column)
-                values.append(content_serialized)
-            if has_depend_by:
-                columns.append("depend_by")
-                values.append(int(depend_by_value) if depend_by_value not in (None, "") else None)
+                columns = ["cell_id", "arkana_object_id"]
+                values = [int(cell_id_for_board), int(self.arkana_id)]
+                if order_column is not None:
+                    columns.append(order_column)
+                    values.append(int(cell.get("order_id") or order_counter))
+                if uses_prev:
+                    columns.append("prev_id")
+                    values.append(int(prev_id_value))
+                columns.extend(["cell_key", "cell_type", "taggs"])
+                values.extend([str(cell_key), str(cell_type), tag_str])
+                if content_column is not None:
+                    columns.append(content_column)
+                    values.append(content_serialized)
+                if has_depend_by:
+                    columns.append("depend_by")
+                    values.append(int(depend_by_value) if depend_by_value not in (None, "") else None)
 
-            placeholders = ", ".join(["%s"] * len(columns))
-            cursor.execute(
-                f"INSERT INTO arkana_dashboard_cells ({', '.join(columns)}) VALUES ({placeholders})",
-                tuple(values),
-            )
+                placeholders = ", ".join(["%s"] * len(columns))
+                cursor.execute(
+                    f"INSERT INTO arkana_dashboard_cells ({', '.join(columns)}) VALUES ({placeholders})",
+                    tuple(values),
+                )
 
-            # Update in-memory ids to reflect persisted values
-            cell["cell_id"] = cell_id_for_board
-            cell["order_id"] = order_counter
-            cell["prev_id"] = int(prev_id_value)
-            cell["prev"] = int(prev_id_value)
-            prev_cell_id = cell_id_for_board
-            order_counter += 1
+                cell["cell_id"] = cell_id_for_board
+                cell["order_id"] = order_counter
+                cell["cell_key"] = cell_key
+                cell["prev_id"] = int(prev_id_value)
+                cell["prev"] = int(prev_id_value)
+                prev_cell_id = cell_id_for_board
+                order_counter += 1
 
-        self._commit_model()
+            self._commit_model()
+        except Exception:
+            self._rollback_model()
+            raise
+        finally:
+            self._close_model()
 
         return self
 
@@ -441,21 +345,71 @@ class ArkBoard(Arkana_Object_Interface):
 
         if self.cells is None:
             self.cells = []
-        order_id = len(self.cells) + 1
+        order_id = self._next_top_level_order_id()
+        next_cell_id = self._next_free_cell_id()
         self.cells.append(
             {
-                "cell_id": None,
+                "cell_id": next_cell_id,
                 "order_id": order_id,
                 "prev_id": self.cells[-1].get("cell_id") if self.cells else 0,
                 "prev": self.cells[-1].get("cell_id") if self.cells else 0,
                 "depend_by": None,
-                "cell_key": f"cell_{order_id}",
+                "cell_key": f"cell_{next_cell_id}",
                 "cell_type": str(cell_type),
                 "taggs": tag_str,
                 "content": payload,
             }
         )
         return None
+
+    def run_cell(self, cell_id, save_result: bool) -> list[dict]:
+        if self.user_object is None:
+            raise RuntimeError("run_cell requires an attached user_object")
+        if self.cells is None:
+            self.load()
+        if self.cells is None:
+            self.cells = []
+
+        parent_index = self._find_runnable_cell_index(cell_id)
+        if parent_index is None:
+            raise ValueError(f"Cell not found: {cell_id}")
+
+        parent_cell = self.cells[parent_index]
+        parent_identifier = parent_cell.get("cell_id") if parent_cell.get("cell_id") not in (None, 0) else parent_cell.get("cell_key")
+        handler = build_action_handler(
+            assigned_to_arkana_id=self.arkana_id,
+            field_id=parent_identifier,
+            field_value=str(parent_cell.get("content") or ""),
+            running_id=parent_identifier,
+            user_object=self.user_object,
+            cell_type=str(parent_cell.get("cell_type") or ""),
+        )
+        result_cells = handler.get_result_cells()
+        if not save_result:
+            transient_cells = self._build_transient_result_cells(parent_cell, result_cells)
+            return [self._serialize_cell(cell) for cell in transient_cells]
+
+        updated_cells = self._replace_result_cells(parent_index, parent_cell, result_cells)
+        self.save()
+        return [self._serialize_cell(cell) for cell in updated_cells]
+
+    def run_all_cells(self, save_result: bool) -> list[dict]:
+        if self.cells is None:
+            self.load()
+        if self.cells is None:
+            self.cells = []
+
+        runnable_identifiers: list[int | str] = []
+        runnable_types = {CellType.PY_CODE.value, CellType.R_CODE.value}
+        for cell in self.cells:
+            if str(cell.get("cell_type") or "") not in runnable_types:
+                continue
+            runnable_identifiers.append(cell.get("cell_id") if cell.get("cell_id") not in (None, 0) else cell.get("cell_key"))
+
+        results: list[dict] = []
+        for identifier in runnable_identifiers:
+            results.append({"cell": identifier, "results": self.run_cell(identifier, save_result)})
+        return results
     def _has_table(self, table_name: str) -> bool:
         try:
             _, cursor = self._ensure_model_cursor()
@@ -509,7 +463,8 @@ class ArkBoard(Arkana_Object_Interface):
         # In-memory ordering only; persist on save()
         if self.cells is None:
             self.cells = []
-        max_order = len(self.cells)
+        top_level_cells = [existing for existing in self.cells if existing.get("depend_by") in (None, 0, "")]
+        max_order = len(top_level_cells)
 
         # Normalize target index (1-based)
         try:
@@ -538,13 +493,17 @@ class ArkBoard(Arkana_Object_Interface):
             payload["taggs"] = self._taggs_to_storage(payload.get("taggs"))
 
         # Defaults
-        cell_key = str(payload.get("cell_key") or f"cell_{target}")
+        next_cell_id = self._next_free_cell_id()
+        cell_key = str(payload.get("cell_key") or f"cell_{next_cell_id}")
         cell_type = str(payload.get("cell_type") or "text")
 
         # Build new cell dict
         new_cell: dict = {
-            "cell_id": None,
+            "cell_id": next_cell_id,
             "order_id": target,
+            "prev_id": 0,
+            "prev": 0,
+            "depend_by": None,
             "cell_key": cell_key,
             "cell_type": cell_type,
             "taggs": payload.get("taggs"),
@@ -556,14 +515,13 @@ class ArkBoard(Arkana_Object_Interface):
                 continue
             new_cell[k] = v
 
-        # Insert in-memory and re-number orders
-        self.cells.insert(target - 1, new_cell)
-        for i, c in enumerate(self.cells, start=1):
-            c["order_id"] = i
+        insert_position = self._top_level_insert_position(target)
+        self.cells.insert(insert_position, new_cell)
+        self._reindex_cells()
         return self
 
     # --------- Cell tag management (no content persistence) ---------
-    def update_cell(self, id: int, new_value: dict | None = None, **kwargs):
+    def update_cell(self, id: int | str, new_value: dict | None = None, **kwargs):
         """
         Update an existing cell's properties in-memory. Writes occur on `save()`.
 
@@ -591,18 +549,7 @@ class ArkBoard(Arkana_Object_Interface):
         if self.cells is None:
             self.cells = []
 
-        # Resolve target cell by cell_id, else by index (1-based)
-        target_cell = None
-        try:
-            id_int = int(id)
-        except Exception:
-            id_int = -1
-        for c in self.cells:
-            if c.get("cell_id") == id_int:
-                target_cell = c
-                break
-        if target_cell is None and 1 <= id_int <= len(self.cells):
-            target_cell = self.cells[id_int - 1]
+        target_cell = self._resolve_cell_by_identifier(id)
         if target_cell is None:
             return self
 
@@ -614,6 +561,8 @@ class ArkBoard(Arkana_Object_Interface):
         for k, v in payload.items():
             target_cell[k] = v
 
+        self._normalize_cell_keys()
+
         return self
 
     def get_cell(self, identifier: int | str) -> dict | None:
@@ -622,10 +571,21 @@ class ArkBoard(Arkana_Object_Interface):
         if self.cells is None:
             self.cells = []
 
-        target = self._resolve_cell(identifier)
+        target = self._resolve_cell_by_identifier(identifier)
         if target is None:
             return None
-        return self._serialize_cell(target)
+        return self._serialize_cell(target, include_children=True)
+
+    def get_cell_by_id(self, cell_id: int) -> dict | None:
+        if self.cells is None:
+            self.load()
+        if self.cells is None:
+            self.cells = []
+
+        for cell in self.cells:
+            if cell.get("cell_id") == int(cell_id):
+                return self._serialize_cell(cell, include_children=True)
+        return None
 
     def delete_cell(self, identifier: int | str):
         if self.cells is None:
@@ -633,13 +593,12 @@ class ArkBoard(Arkana_Object_Interface):
         if self.cells is None:
             self.cells = []
 
-        target = self._resolve_cell(identifier)
+        target = self._resolve_cell_by_identifier(identifier)
         if target is None:
             return self
 
         self.cells.remove(target)
-        for index, cell in enumerate(self.cells, start=1):
-            cell["order_id"] = index
+        self._reindex_cells()
         return self
 
     def add_cell_tag(self, id: int, tag: str):
@@ -721,7 +680,7 @@ class ArkBoard(Arkana_Object_Interface):
             result[fid] = tokens
         return result
 
-    def _resolve_cell(self, identifier: int | str) -> dict | None:
+    def _resolve_cell_by_identifier(self, identifier: int | str) -> dict | None:
         if self.cells is None:
             self.cells = []
 
@@ -731,17 +690,173 @@ class ArkBoard(Arkana_Object_Interface):
             int_identifier = None
 
         if int_identifier is not None:
-            for cell in self.cells:
-                if cell.get("cell_id") == int_identifier:
-                    return cell
-            if 1 <= int_identifier <= len(self.cells):
-                return self.cells[int_identifier - 1]
+            root_cells = [cell for cell in self.cells if cell.get("depend_by") in (None, 0, "")]
+            if 1 <= int_identifier <= len(root_cells):
+                return root_cells[int_identifier - 1]
 
         str_identifier = str(identifier)
         for cell in self.cells:
             if str(cell.get("cell_key")) == str_identifier:
                 return cell
         return None
+
+    def _find_runnable_cell_index(self, identifier: int | str) -> int | None:
+        if self.cells is None:
+            self.cells = []
+
+        try:
+            int_identifier = int(identifier)
+        except Exception:
+            int_identifier = None
+
+        if int_identifier is not None:
+            root_indices = [
+                index for index, cell in enumerate(self.cells)
+                if cell.get("depend_by") in (None, 0, "")
+            ]
+            if 1 <= int_identifier <= len(root_indices):
+                return root_indices[int_identifier - 1]
+
+        str_identifier = str(identifier)
+        for index, cell in enumerate(self.cells):
+            if cell.get("depend_by") not in (None, 0, ""):
+                continue
+            if str(cell.get("cell_key")) == str_identifier:
+                return index
+        return None
+
+    def _prepare_result_cell(self, parent_cell: dict, result_cell: dict) -> dict:
+        prepared = dict(result_cell)
+        parent_cell_id = int(parent_cell.get("cell_id") or 0)
+        parent_prev = parent_cell.get("prev_id", parent_cell.get("prev", 0))
+        parent_order_id = int(parent_cell.get("order_id") or 0)
+        prepared["cell_id"] = None
+        prepared["cell_key"] = parent_cell.get("cell_key")
+        prepared["order_id"] = parent_order_id
+        prepared["prev_id"] = parent_prev
+        prepared["prev"] = parent_prev
+        prepared["depend_by"] = parent_cell_id
+        return prepared
+
+    def _build_transient_result_cells(self, parent_cell: dict, result_cells: list[dict]) -> list[dict]:
+        next_cell_id = self._next_free_cell_id()
+        prepared_cells: list[dict] = []
+        for offset, result_cell in enumerate(result_cells):
+            prepared = self._prepare_result_cell(parent_cell, result_cell)
+            prepared["cell_id"] = next_cell_id + offset
+            prepared_cells.append(prepared)
+        return prepared_cells
+
+    def _replace_result_cells(self, parent_index: int, parent_cell: dict, result_cells: list[dict]) -> list[dict]:
+        if self.cells is None:
+            self.cells = []
+
+        parent_cell_id = int(parent_cell.get("cell_id") or 0)
+        existing_file_cells: list[dict] = []
+        remaining_cells: list[dict] = []
+        for index, cell in enumerate(self.cells):
+            if index == parent_index:
+                remaining_cells.append(cell)
+                continue
+            if cell.get("depend_by") != parent_cell_id:
+                remaining_cells.append(cell)
+                continue
+            cell_type = str(cell.get("cell_type") or "")
+            if cell_type.endswith("_result") or cell_type == CellType.FILE.value:
+                if cell_type == CellType.FILE.value:
+                    existing_file_cells.append(cell)
+                continue
+
+        new_result_cells = self._build_transient_result_cells(parent_cell, result_cells)
+        existing_file_contents = {str(cell.get("content")) for cell in existing_file_cells}
+        merged_result_cells: list[dict] = []
+        for cell in new_result_cells:
+            if str(cell.get("cell_type") or "") == CellType.FILE.value and str(cell.get("content")) in existing_file_contents:
+                continue
+            merged_result_cells.append(cell)
+
+        insert_at = parent_index + 1
+        for offset, cell in enumerate(merged_result_cells + existing_file_cells):
+            remaining_cells.insert(insert_at + offset, cell)
+
+        self.cells = remaining_cells
+        self._reindex_cells()
+        self._normalize_cell_keys()
+        return [cell for cell in self.cells if cell.get("depend_by") == parent_cell_id]
+
+    def _next_free_cell_id(self) -> int:
+        if self.cells is None:
+            return 1
+        current_max = 0
+        for cell in self.cells:
+            try:
+                current_max = max(current_max, int(cell.get("cell_id") or 0))
+            except (TypeError, ValueError):
+                continue
+        return current_max + 1
+
+    def _next_top_level_order_id(self) -> int:
+        if self.cells is None:
+            return 1
+        root_cells = [cell for cell in self.cells if cell.get("depend_by") in (None, 0, "")]
+        return len(root_cells) + 1
+
+    def _top_level_insert_position(self, target_index: int) -> int:
+        if self.cells is None:
+            return 0
+        root_count = 0
+        for index, cell in enumerate(self.cells):
+            if cell.get("depend_by") not in (None, 0, ""):
+                continue
+            root_count += 1
+            if root_count == target_index:
+                return index
+        return len(self.cells)
+
+    def _reindex_cells(self) -> None:
+        if self.cells is None:
+            return
+        current_index = 0
+        current_parent_id = None
+        order_by_parent: dict[int, int] = {}
+        for cell in self.cells:
+            depend_by = cell.get("depend_by")
+            if depend_by in (None, 0, ""):
+                current_index += 1
+                cell["order_id"] = current_index
+                current_parent_id = cell.get("cell_id")
+                if current_parent_id not in (None, 0, ""):
+                    order_by_parent[int(current_parent_id)] = current_index
+            else:
+                parent_id = int(depend_by)
+                cell["order_id"] = order_by_parent.get(parent_id, current_index)
+
+    def _normalize_cell_keys(self) -> None:
+        if self.cells is None:
+            return
+        used_cell_keys: set[str] = set()
+        for cell in self.cells:
+            raw_cell_id = cell.get("cell_id")
+            try:
+                cell_id = int(raw_cell_id) if raw_cell_id is not None else 0
+            except (TypeError, ValueError):
+                cell_id = 0
+            if cell_id <= 0:
+                cell_id = self._next_free_cell_id()
+                cell["cell_id"] = cell_id
+            cell["cell_key"] = self._ensure_unique_cell_key(cell.get("cell_key"), cell_id, used_cell_keys)
+
+    def _ensure_unique_cell_key(self, proposed_key, cell_id: int, used_cell_keys: set[str]) -> str:
+        base_key = str(proposed_key).strip() if proposed_key is not None else ""
+        if not base_key:
+            base_key = f"cell_{cell_id}"
+        unique_key = base_key
+        suffix = 1
+        while unique_key in used_cell_keys:
+            unique_key = f"{base_key}_{suffix}"
+            suffix += 1
+        used_cell_keys.add(unique_key)
+        return unique_key
 
     @staticmethod
     def _taggs_to_storage(taggs) -> str | None:
@@ -766,12 +881,61 @@ class ArkBoard(Arkana_Object_Interface):
             return [s for s in taggs.split() if s]
         return [str(tag).strip() for tag in taggs if str(tag).strip()]
 
-    def _serialize_cell(self, cell: dict) -> dict:
-        serialized = dict(cell)
-        serialized["taggs"] = self._taggs_to_list(serialized.get("taggs"))
-        return serialized
+    def _serialize_cells_for_api(self, cells: list[dict], include_index: bool) -> list[dict]:
+        serialized_by_id: dict[int, dict] = {}
+        root_cells: list[dict] = []
 
-    def get_next_running_id(self) -> int:
-        #todo get next running id 
-        running_id = 0
-        return 0
+        ordered_cells = sorted(
+            cells,
+            key=lambda cell: (
+                int(cell.get("order_id") or 0),
+                1 if cell.get("depend_by") not in (None, 0, "") else 0,
+                int(cell.get("cell_id") or 0),
+            ),
+        )
+
+        for cell in ordered_cells:
+            is_child = cell.get("depend_by") not in (None, 0, "")
+            serialized = self._serialize_cell(
+                cell,
+                include_children=False,
+                include_index=(include_index and not is_child),
+            )
+            cell_id = int(cell.get("cell_id") or 0)
+            if cell_id > 0:
+                serialized_by_id[cell_id] = serialized
+
+            depend_by = cell.get("depend_by")
+            if depend_by in (None, 0, ""):
+                root_cells.append(serialized)
+                continue
+
+            parent = serialized_by_id.get(int(depend_by))
+            if parent is None:
+                root_cells.append(serialized)
+                continue
+            parent.setdefault("cells", []).append(serialized)
+
+        return root_cells
+
+    def _serialize_cell(self, cell: dict, include_children: bool = False, include_index: bool = True) -> dict:
+        serialized = dict(cell)
+        if include_index:
+            serialized["index"] = int(serialized.get("order_id") or 0)
+        serialized["taggs"] = self._taggs_to_list(serialized.get("taggs"))
+        serialized.pop("order_id", None)
+        serialized.pop("prev", None)
+        serialized.pop("prev_id", None)
+        serialized.pop("depend_by", None)
+        if include_children and self.cells is not None and cell.get("cell_id") not in (None, 0):
+            parent_id = int(cell.get("cell_id"))
+            child_cells = [
+                child for child in self.cells
+                if child.get("depend_by") == parent_id
+            ]
+            serialized["cells"] = self._serialize_cells_for_api(child_cells, include_index=False)
+        else:
+            serialized["cells"] = []
+        if not include_index:
+            serialized.pop("index", None)
+        return serialized

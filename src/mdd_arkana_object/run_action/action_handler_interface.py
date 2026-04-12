@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
+from src.arkana_mdd_db.config import load_env
 from src.arkana_sphere.arkana_session_run_result import ArkanaSessionRunResult
 from src.mdd_arkana_object.cell_types import CellType
 
@@ -74,15 +76,22 @@ class ActionHandlerInterface:
         )
 
         for session_file in result.get_session_files():
+            file_name = str(session_file).split("/")[-1]
             cells.append(
                 {
                     "cell_id": -1,
                     "cell_type": CellType.FILE.value,
-                    "content": session_file,
+                    "content": self._build_file_url(file_name),
+                    "file_name": file_name,
                     "session_id": result.session_id,
                 }
             )
         return cells
+
+    def _build_file_url(self, file_name: str) -> str:
+        load_env()
+        root_path = os.getenv("ROOT_PATH", "http://127.0.0.1:8000").rstrip("/")
+        return f"{root_path}/dashboard/{self.get_arkana_id()}/files/{file_name}"
 
 
 class UnsupportedActionHandler(ActionHandlerInterface):
@@ -117,7 +126,6 @@ def build_action_handler(
     if normalized == CellType.R_CODE.value:
         return ActionHandlerR(assigned_to_arkana_id, field_id, field_value, running_id, user_object)
     return UnsupportedActionHandler(assigned_to_arkana_id, field_id, field_value, running_id, user_object)
-
 
 
 

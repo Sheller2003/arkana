@@ -23,6 +23,7 @@ class Arkana_Object_Interface:
     description: str | None = None
     modeling_db: int = 0
     db_connection: ArkanaObjectDBConnection | None = None
+    user_object = None
     _runtime_connection = None  # type: ignore[var-annotated]
     _runtime_cursor = None  # type: ignore[var-annotated]
 
@@ -55,6 +56,7 @@ class Arkana_Object_Interface:
 
         db_connection = kwargs.get("db_connection")
         self.db_connection = db_connection if isinstance(db_connection, ArkanaObjectDBConnection) else None
+        self.user_object = kwargs.get("user_object")
         self._runtime_connection = kwargs.get("db_runtime_connection")
         self._runtime_cursor = kwargs.get("db_cursor")
 
@@ -146,6 +148,29 @@ class Arkana_Object_Interface:
             self._runtime_connection.commit()
             return
         self._commit()
+
+    def _rollback_model(self) -> None:
+        if self._runtime_connection is not None:
+            self._runtime_connection.rollback()
+            return
+        if self._shared_connection is not None:
+            self._shared_connection.rollback()
+
+    def _close_model(self) -> None:
+        if self._runtime_cursor is not None:
+            try:
+                self._runtime_cursor.close()
+            except Exception:
+                pass
+            self._runtime_cursor = None
+        if self._runtime_connection is not None:
+            try:
+                self._runtime_connection.close()
+            except Exception:
+                pass
+            self._runtime_connection = None
+            return
+        self._close_shared()
 
     def check_with_key(self, key) -> bool:
         """

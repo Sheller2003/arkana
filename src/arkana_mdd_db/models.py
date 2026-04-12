@@ -64,3 +64,11 @@ class DashboardCellRequest(BaseModel):
     cell_type: str | None = None
     taggs: list[str] | str | None = None
     content: str | None = None
+
+
+class DashboardCreateRequest(BaseModel):
+    auth_group: int = Field(default=1, ge=1)
+    object_key: str | None = None
+    description: str | None = None
+    arkana_group: int | None = None
+    cells: list[DashboardCellRequest] = Field(default_factory=list)

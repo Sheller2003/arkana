@@ -128,6 +128,24 @@ class ArkanaUsageAccounting:
         # 1 -> enterprise user infinity tokens and runtime
         return _plan_info(self._plan_id)
 
+    def get_today_usage(self) -> dict[str, int | str]:
+        self._ensure_today()
+        return {
+            "date": self._usage.day.isoformat(),
+            "runtime_seconds_used": int(self._usage.runtime_seconds_used),
+            "tokens_used": int(self._usage.tokens_used),
+        }
+
+    def get_daily_max_usage(self) -> dict[str, int]:
+        self._ensure_today()
+        plan = self.get_user_accounting_plan()
+        max_runtime = plan["max_runtime_seconds"]
+        max_tokens = plan["max_tokens"]
+        return {
+            "runtime_seconds_max": -1 if max_runtime is None else int(max_runtime),
+            "tokens_max": -1 if max_tokens is None else int(max_tokens),
+        }
+
     def save(self, main_db: "ArkanaMainDB") -> None:
         """Persist (upsert) today's accounting record and plan to the DB.
 
@@ -179,5 +197,4 @@ class ArkanaUsageAccounting:
                 connection.commit()
             finally:
                 cursor.close()
-
 
