@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src.arkana_api_service.dependencies import get_current_user
+from src.arkana_api_service.routes.help_utils import build_help, with_help
 from src.arkana_auth.user_object import ArkanaUser
 
 router = APIRouter(tags=["user"])
@@ -11,36 +12,59 @@ router = APIRouter(tags=["user"])
 @router.get("/user/usage")
 def get_user_usage(
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     accounting = current_user.get_accounting_obj().load_by_db()
     usage = accounting.get_today_usage()
-    return {
-        "user_id": current_user.user_id,
-        "service": accounting.service,
-        **usage,
-    }
+    return with_help(
+        {
+            "user_id": current_user.user_id,
+            "service": accounting.service,
+            **usage,
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/user/usage",
+            method="GET",
+            description="Returns today's runtime usage for the authenticated user.",
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with today's usage counters.",
+        ),
+    )
 
 
 @router.get("/user/max_usage")
 def get_user_max_usage(
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     accounting = current_user.get_accounting_obj().load_by_db()
     if current_user.user_role == "root":
         max_usage = {"runtime_seconds_max": -1, "tokens_max": -1}
     else:
         max_usage = accounting.get_daily_max_usage()
-    return {
-        "user_id": current_user.user_id,
-        "service": accounting.service,
-        **max_usage,
-    }
+    return with_help(
+        {
+            "user_id": current_user.user_id,
+            "service": accounting.service,
+            **max_usage,
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/user/max_usage",
+            method="GET",
+            description="Returns the daily runtime/token limit for the authenticated user. Root or unlimited users get -1.",
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with daily usage limits.",
+        ),
+    )
 
 
 @router.get("/user/usage/{user_id}")
 def get_specific_user_usage(
     user_id: str,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     if current_user.user_role != "root":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Root role required")
@@ -70,8 +94,19 @@ def get_specific_user_usage(
         main_db=current_user.main_db,
     ).load_by_db()
     usage = accounting.get_today_usage()
-    return {
-        "user_id": auth_user.user_id,
-        "service": accounting.service,
-        **usage,
-    }
+    return with_help(
+        {
+            "user_id": auth_user.user_id,
+            "service": accounting.service,
+            **usage,
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/user/usage/{user_id}",
+            method="GET",
+            description="Root-only endpoint returning today's runtime usage for a specific user.",
+            path_parameters={"user_id": "The target user id."},
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with today's usage counters for the requested user.",
+        ),
+    )

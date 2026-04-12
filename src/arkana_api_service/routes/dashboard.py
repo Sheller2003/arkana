@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
 from src.arkana_api_service.dependencies import get_current_user
+from src.arkana_api_service.routes.help_utils import build_help, with_help
 from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_mdd_db.config import load_env
 from src.arkana_mdd_db.models import DashboardCellRequest, DashboardCreateRequest
@@ -47,6 +48,7 @@ def _normalize_cell_for_api(arkana_id: int, cell: dict[str, object]) -> dict[str
 def get_dashboard(
     arkana_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     manager = ArkanaObjectManager(current_user)
     try:
@@ -63,13 +65,25 @@ def get_dashboard(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Database unavailable: {exc}",
         ) from exc
-    return _normalize_cell_for_api(arkana_id, dashboard.to_json())
+    return with_help(
+        _normalize_cell_for_api(arkana_id, dashboard.to_json()),
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}",
+            method="GET",
+            description="Returns a report including its top-level cells and dependent sub-cells.",
+            path_parameters={"arkana_id": "The report object id."},
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with report metadata and cells.",
+        ),
+    )
 
 
 @router.post("/report")
 def create_dashboard(
     request: DashboardCreateRequest,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     auth_group = int(request.auth_group or 1)
     if not current_user.check_user_group_allowed(auth_group):
@@ -96,7 +110,18 @@ def create_dashboard(
             if payload.get("cell_key") is not None:
                 latest["cell_key"] = payload["cell_key"]
     board.save()
-    return _normalize_cell_for_api(int(board.arkana_id), board.to_json())
+    return with_help(
+        _normalize_cell_for_api(int(board.arkana_id), board.to_json()),
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report",
+            method="POST",
+            description="Creates a new report and optionally seeds it with initial cells.",
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            body="DashboardCreateRequest JSON body.",
+            returns="JSON object with the created report.",
+        ),
+    )
 
 
 def _load_dashboard(current_user: ArkanaUser, arkana_id: int) -> ArkanaReport:
@@ -163,17 +188,52 @@ def get_dashboard_cell(
     cell_identifier: str,
     cell_id: int | None = Query(default=None, ge=1),
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     if cell_identifier == "get" and cell_id is not None:
         cell = dashboard.get_cell_by_id(cell_id)
         if cell is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
-        return _cell_get_response(_normalize_cell_for_api(arkana_id, cell))
+        normalized_cell = _normalize_cell_for_api(arkana_id, cell)
+        if help:
+            return with_help(
+                normalized_cell,
+                help_enabled=True,
+                help_payload=build_help(
+                    endpoint="/report/{arkana_id}/cell/get",
+                    method="GET",
+                    description="Resolves a cell by exact cell_id and returns content according to its type.",
+                    path_parameters={"arkana_id": "The report object id."},
+                    query_parameters={
+                        "cell_id": "The exact internal cell id.",
+                        "help": "Optional. If true, appends endpoint documentation to the response.",
+                    },
+                    returns="JSON metadata when help=true, otherwise redirect/html/plain text/cell JSON depending on cell_type.",
+                ),
+            )
+        return _cell_get_response(normalized_cell)
     cell = dashboard.get_cell_by_id(cell_id) if cell_id is not None else dashboard.get_cell(cell_identifier)
     if cell is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
-    return _normalize_cell_for_api(arkana_id, cell)
+    return with_help(
+        _normalize_cell_for_api(arkana_id, cell),
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/cell/{cell_identifier}",
+            method="GET",
+            description="Returns a single cell as JSON. Numeric path identifiers address the visible top-level index; strings address cell_key.",
+            path_parameters={
+                "arkana_id": "The report object id.",
+                "cell_identifier": "A top-level index or cell_key.",
+            },
+            query_parameters={
+                "cell_id": "Optional exact internal cell id. If present it overrides cell_identifier.",
+                "help": "Optional. If true, appends endpoint documentation to the response.",
+            },
+            returns="JSON object for the resolved cell.",
+        ),
+    )
 
 
 @router.get("/report/{arkana_id}/cell")
@@ -182,12 +242,27 @@ def get_dashboard_cell_by_id(
     arkana_id: int,
     cell_id: int = Query(..., ge=1),
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     cell = dashboard.get_cell_by_id(cell_id)
     if cell is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
-    return _normalize_cell_for_api(arkana_id, cell)
+    return with_help(
+        _normalize_cell_for_api(arkana_id, cell),
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/cell",
+            method="GET",
+            description="Returns a cell by its exact internal cell_id.",
+            path_parameters={"arkana_id": "The report object id."},
+            query_parameters={
+                "cell_id": "The exact internal cell id.",
+                "help": "Optional. If true, appends endpoint documentation to the response.",
+            },
+            returns="JSON object for the resolved cell.",
+        ),
+    )
 
 
 @router.get("/report/{arkana_id}/cell/get")
@@ -195,12 +270,30 @@ def get_dashboard_cell_content_by_id(
     arkana_id: int,
     cell_id: int = Query(..., ge=1),
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ):
     dashboard = _load_dashboard(current_user, arkana_id)
     cell = dashboard.get_cell_by_id(cell_id)
     if cell is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
-    return _cell_get_response(_normalize_cell_for_api(arkana_id, cell))
+    normalized_cell = _normalize_cell_for_api(arkana_id, cell)
+    if help:
+        return with_help(
+            normalized_cell,
+            help_enabled=True,
+            help_payload=build_help(
+                endpoint="/report/{arkana_id}/cell/get",
+                method="GET",
+                description="Returns cell content by exact cell_id. File cells redirect, html returns HTML, md/text return plain text.",
+                path_parameters={"arkana_id": "The report object id."},
+                query_parameters={
+                    "cell_id": "The exact internal cell id.",
+                    "help": "Optional. If true, appends endpoint documentation to the response.",
+                },
+                returns="JSON metadata when help=true, otherwise redirect/html/plain text/cell JSON depending on cell_type.",
+            ),
+        )
+    return _cell_get_response(normalized_cell)
 
 
 @router.get("/report/{arkana_id}/cell/{cell_identifier}/get")
@@ -208,18 +301,37 @@ def get_dashboard_cell_content(
     arkana_id: int,
     cell_identifier: str,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ):
     dashboard = _load_dashboard(current_user, arkana_id)
     cell = dashboard.get_cell(cell_identifier)
     if cell is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
-    return _cell_get_response(_normalize_cell_for_api(arkana_id, cell))
+    normalized_cell = _normalize_cell_for_api(arkana_id, cell)
+    if help:
+        return with_help(
+            normalized_cell,
+            help_enabled=True,
+            help_payload=build_help(
+                endpoint="/report/{arkana_id}/cell/{cell_identifier}/get",
+                method="GET",
+                description="Returns cell content by top-level index or cell_key. File cells redirect, html returns HTML, md/text return plain text.",
+                path_parameters={
+                    "arkana_id": "The report object id.",
+                    "cell_identifier": "A top-level index or cell_key.",
+                },
+                query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+                returns="JSON metadata when help=true, otherwise redirect/html/plain text/cell JSON depending on cell_type.",
+            ),
+        )
+    return _cell_get_response(normalized_cell)
 
 
 @router.get("/report/{arkana_id}/files")
 def get_dashboard_files(
     arkana_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     _ensure_object_group_access(current_user, arkana_id)
     session_manager = ArkanaSessionManager()
@@ -236,7 +348,18 @@ def get_dashboard_files(
         }
         for file_info in files
     ]
-    return {"arkana_object_id": arkana_id, "files": file_entries}
+    return with_help(
+        {"arkana_object_id": arkana_id, "files": file_entries},
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/files",
+            method="GET",
+            description="Lists exported report files with allowed endings .csv, .txt and .png.",
+            path_parameters={"arkana_id": "The report object id."},
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with file_name and file_url entries.",
+        ),
+    )
 
 
 @router.get("/report/{arkana_id}/files/{file_name}")
@@ -244,7 +367,8 @@ def get_dashboard_file(
     arkana_id: int,
     file_name: str,
     current_user: ArkanaUser = Depends(get_current_user),
-) -> FileResponse:
+    help: bool = Query(default=False),
+):
     _ensure_object_group_access(current_user, arkana_id)
     session_manager = ArkanaSessionManager()
     file_info = session_manager.get_session_file(
@@ -255,6 +379,26 @@ def get_dashboard_file(
     )
     if file_info is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if help:
+        return with_help(
+            {
+                "arkana_object_id": arkana_id,
+                "file_name": file_info["file_name"],
+                "file_url": f"{_get_root_path()}/report/{arkana_id}/files/{file_info['file_name']}",
+            },
+            help_enabled=True,
+            help_payload=build_help(
+                endpoint="/report/{arkana_id}/files/{file_name}",
+                method="GET",
+                description="Returns a stored report file. When help=true, metadata is returned instead of the file stream.",
+                path_parameters={
+                    "arkana_id": "The report object id.",
+                    "file_name": "The file name inside the report workspace.",
+                },
+                query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+                returns="File response normally, JSON metadata when help=true.",
+            ),
+        )
     return FileResponse(path=file_info["absolute_path"], filename=file_info["file_name"])
 
 
@@ -264,6 +408,7 @@ def update_dashboard_cell(
     cell_identifier: str,
     request: DashboardCellRequest,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     payload = request.model_dump(exclude_none=True)
@@ -273,7 +418,22 @@ def update_dashboard_cell(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
     dashboard.save()
     result_cell = dashboard.get_cell(cell_identifier) or cell
-    return _normalize_cell_for_api(arkana_id, result_cell)
+    return with_help(
+        _normalize_cell_for_api(arkana_id, result_cell),
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/cell/{cell_identifier}",
+            method="PUT",
+            description="Updates a cell by top-level index or cell_key.",
+            path_parameters={
+                "arkana_id": "The report object id.",
+                "cell_identifier": "A top-level index or cell_key.",
+            },
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            body="DashboardCellRequest JSON body.",
+            returns="JSON object for the updated cell.",
+        ),
+    )
 
 
 @router.delete("/report/{arkana_id}/cell/{cell_identifier}")
@@ -281,19 +441,35 @@ def delete_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     cell = dashboard.get_cell(cell_identifier)
     if cell is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cell not found")
     dashboard.delete_cell(cell_identifier).save()
-    return {"status": "deleted", "cell": cell}
+    return with_help(
+        {"status": "deleted", "cell": cell},
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/cell/{cell_identifier}",
+            method="DELETE",
+            description="Deletes a cell by top-level index or cell_key.",
+            path_parameters={
+                "arkana_id": "The report object id.",
+                "cell_identifier": "A top-level index or cell_key.",
+            },
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with the deleted cell payload.",
+        ),
+    )
 
 
 @router.delete("/report/{arkana_id}")
 def delete_dashboard(
     arkana_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     if not current_user.check_user_permissions("admin"):
@@ -303,12 +479,23 @@ def delete_dashboard(
     deleted_sessions = session_manager.delete_object_sessions(arkana_id)
     deleted_workspaces = session_manager.delete_object_workspaces(arkana_id)
     _delete_arkana_object(int(dashboard.arkana_id))
-    return {
-        "status": "deleted",
-        "arkana_object_id": arkana_id,
-        "deleted_sessions": deleted_sessions,
-        "deleted_workspaces": deleted_workspaces,
-    }
+    return with_help(
+        {
+            "status": "deleted",
+            "arkana_object_id": arkana_id,
+            "deleted_sessions": deleted_sessions,
+            "deleted_workspaces": deleted_workspaces,
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}",
+            method="DELETE",
+            description="Deletes a report, all assigned cells, related containers and workspaces.",
+            path_parameters={"arkana_id": "The report object id."},
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with deletion summary.",
+        ),
+    )
 
 
 @router.post("/report/{arkana_id}/cell/")
@@ -317,6 +504,7 @@ def create_dashboard_cell(
     request: DashboardCellRequest,
     index: int | None = Query(default=None, ge=1),
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     payload = request.model_dump(exclude_none=True)
@@ -335,7 +523,22 @@ def create_dashboard_cell(
     if not cells:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Cell could not be created")
     created_cell = cells[-1] if index is None else cells[index - 1]
-    return _normalize_cell_for_api(arkana_id, dashboard.get_cell(created_cell.get("cell_key")) or created_cell)
+    return with_help(
+        _normalize_cell_for_api(arkana_id, dashboard.get_cell(created_cell.get("cell_key")) or created_cell),
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/cell/",
+            method="POST",
+            description="Creates a new top-level cell. If index is set, insertion uses the visible top-level order and ignores dependent cells.",
+            path_parameters={"arkana_id": "The report object id."},
+            query_parameters={
+                "index": "Optional insertion position for the top-level cell list.",
+                "help": "Optional. If true, appends endpoint documentation to the response.",
+            },
+            body="DashboardCellRequest JSON body.",
+            returns="JSON object for the created cell.",
+        ),
+    )
 
 
 @router.post("/report/{arkana_id}/run")
@@ -343,6 +546,7 @@ def run_dashboard_cells(
     arkana_id: int,
     save: bool = Query(default=True),
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     try:
@@ -367,7 +571,21 @@ def run_dashboard_cells(
             )
         else:
             normalized_results.append(result)
-    return {"arkana_object_id": arkana_id, "save_result": save, "results": normalized_results}
+    return with_help(
+        {"arkana_object_id": arkana_id, "save_result": save, "results": normalized_results},
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/run",
+            method="POST",
+            description="Runs all executable code cells in the report.",
+            path_parameters={"arkana_id": "The report object id."},
+            query_parameters={
+                "save": "Optional. If true, persists result cells.",
+                "help": "Optional. If true, appends endpoint documentation to the response.",
+            },
+            returns="JSON object with the run results for each executed cell.",
+        ),
+    )
 
 
 def _run_dashboard_cell(
@@ -375,6 +593,7 @@ def _run_dashboard_cell(
     cell_identifier: str,
     save: bool,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = False,
 ) -> dict[str, object]:
     dashboard = _load_dashboard(current_user, arkana_id)
     try:
@@ -385,12 +604,29 @@ def _run_dashboard_cell(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    return {
-        "arkana_object_id": arkana_id,
-        "cell": cell_identifier,
-        "save_result": save,
-        "results": [_normalize_cell_for_api(arkana_id, item) if isinstance(item, dict) else item for item in results],
-    }
+    return with_help(
+        {
+            "arkana_object_id": arkana_id,
+            "cell": cell_identifier,
+            "save_result": save,
+            "results": [_normalize_cell_for_api(arkana_id, item) if isinstance(item, dict) else item for item in results],
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/report/{arkana_id}/cell/{cell_identifier}/run",
+            method="GET" if not save else "POST",
+            description="Runs a single executable cell. String identifiers use cell_key. Numeric identifiers use the visible top-level index.",
+            path_parameters={
+                "arkana_id": "The report object id.",
+                "cell_identifier": "A top-level index or cell_key.",
+            },
+            query_parameters={
+                "save": "POST only. If true, persists result cells.",
+                "help": "Optional. If true, appends endpoint documentation to the response.",
+            },
+            returns="JSON object with the produced result cells.",
+        ),
+    )
 
 
 @router.get("/report/{arkana_id}/cell/{cell_identifier}/run")
@@ -399,8 +635,9 @@ def get_run_dashboard_cell(
     arkana_id: int,
     cell_identifier: str,
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
-    return _run_dashboard_cell(arkana_id, cell_identifier, False, current_user)
+    return _run_dashboard_cell(arkana_id, cell_identifier, False, current_user, help)
 
 
 @router.post("/report/{arkana_id}/cell/{cell_identifier}/run")
@@ -410,5 +647,6 @@ def post_run_dashboard_cell(
     cell_identifier: str,
     save: bool = Query(default=True),
     current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
 ) -> dict[str, object]:
-    return _run_dashboard_cell(arkana_id, cell_identifier, save, current_user)
+    return _run_dashboard_cell(arkana_id, cell_identifier, save, current_user, help)
