@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/app \
     XDG_DATA_HOME=/app/.local/share \
-    PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
+    PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring \
+    PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
 
@@ -12,8 +13,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends docker.io \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -m venv /opt/venv
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 RUN mkdir -p /app/.local/share/python_keyring
 
