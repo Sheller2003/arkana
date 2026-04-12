@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import os
 import secrets
 from typing import Any, Iterator
 from urllib.parse import urlparse
 
 import keyring
+from keyring.errors import NoKeyringError
 import mysql.connector
 from mysql.connector import MySQLConnection
 
@@ -85,11 +87,36 @@ class ArkanaMainDB:
         if user is None:
             return None
 
-        stored_password = keyring.get_password(self.config.api_keyring_service, username)
+        stored_password = self._get_api_password(username)
         if stored_password is None or not secrets.compare_digest(stored_password, password):
             return None
 
         return user
+
+    @staticmethod
+    def _username_env_key(username: str) -> str:
+        normalized = []
+        for char in str(username):
+            normalized.append(char.upper() if char.isalnum() else "_")
+        return "ARKANA_API_PASSWORD_" + "".join(normalized)
+
+    def _get_api_password(self, username: str) -> str | None:
+        try:
+            stored_password = keyring.get_password(self.config.api_keyring_service, username)
+        except NoKeyringError:
+            stored_password = None
+        if stored_password:
+            return stored_password
+
+        specific_env = os.getenv(self._username_env_key(username))
+        if specific_env:
+            return specific_env
+
+        shared_env = os.getenv("ARKANA_API_PASSWORD")
+        if shared_env:
+            return shared_env
+
+        return None
 
     def get_user_by_name(self, username: str) -> AuthUser | None:
         query = """

@@ -7,18 +7,37 @@ Dieses Projekt kann als API-Container deployed werden. Die Sandbox-Sessions lauf
 - Docker und Docker Compose auf dem Server
 - erreichbare MySQL-Datenbank
 - `.env` im Projektordner
+- API-Basic-Auth-Passwort in `.env`, wenn kein Keyring im Container vorhanden ist
 
 ## Wichtige Architektur
 
 - `arkana-api` ist der eigentliche API-Container
 - Python- und R-Sessions werden zur Laufzeit vom API-Container aus ueber den Host-Docker-Daemon gestartet
 - dafuer wird `/var/run/docker.sock` in den API-Container gemountet
+- `keyring` speichert Passwoerter im Container dateibasiert und persistent unter `./keyring_data`
 
 ## Start
 
 ```bash
 docker compose up -d --build
 ```
+
+## Keyring im Container
+
+Der Container verwendet absichtlich einen dateibasierten Keyring-Backend:
+
+- Backend: `keyrings.alt.file.PlaintextKeyring`
+- persistenter Ordner: `./keyring_data`
+
+Dadurch funktionieren `keyring.get_password(...)` und `keyring.set_password(...)` auch auf dem Server fuer alle User.
+
+Wenn du API-Passwoerter initial setzen willst, kannst du z. B. im laufenden Container dein vorhandenes Script verwenden:
+
+```bash
+docker compose exec arkana-api python scripts/cli_set_api_pw.py
+```
+
+Der `.env`-Fallback fuer `ARKANA_API_PASSWORD` bzw. `ARKANA_API_PASSWORD_<USER>` bleibt nur als Reserve aktiv.
 
 ## Stop
 
