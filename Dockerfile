@@ -11,6 +11,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends docker.io \
+    && ln -sf /usr/bin/docker /usr/local/bin/docker \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/venv

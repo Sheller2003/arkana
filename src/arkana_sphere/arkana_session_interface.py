@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 import subprocess
 import time
@@ -42,6 +43,7 @@ class ArkanaSessionInterface:
         self.workspace_root_path = self.base_path / "workspaces"
         self.workspace_path = self.workspace_root_path / self.workspace_key
         self.metadata_path = self.session_path / "metadata.json"
+        self.docker_bin = self._resolve_docker_bin()
 
     def run_command(self, sCommand: str) -> ArkanaSessionRunResult:
         self._cleanup_if_expired()
@@ -97,7 +99,7 @@ class ArkanaSessionInterface:
 
     def delete_session(self) -> bool:
         if self._container_exists():
-            subprocess.run(["docker", "rm", "-f", self.container_name], capture_output=True, text=True, check=False)
+            subprocess.run(self._docker_cmd("rm", "-f", self.container_name), capture_output=True, text=True, check=False)
         if self.session_path.exists():
             shutil.rmtree(self.session_path, ignore_errors=True)
         return True
@@ -114,22 +116,23 @@ class ArkanaSessionInterface:
         self.create_volume()
         self._ensure_image_available()
         command = [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            self.container_name,
-            "--label",
-            f"arkana.session_id={self.session_id}",
-            "--label",
-            f"arkana.user_id={self.get_user_id()}",
-            "--label",
-            f"arkana.object_id={self.arkana_object_id}",
-            "-v",
-            f"{self.workspace_path}:{CONTAINER_WORKDIR}",
-            "-w",
-            CONTAINER_WORKDIR,
-            self.docker_image,
+            *self._docker_cmd(
+                "run",
+                "-d",
+                "--name",
+                self.container_name,
+                "--label",
+                f"arkana.session_id={self.session_id}",
+                "--label",
+                f"arkana.user_id={self.get_user_id()}",
+                "--label",
+                f"arkana.object_id={self.arkana_object_id}",
+                "-v",
+                f"{self.workspace_path}:{CONTAINER_WORKDIR}",
+                "-w",
+                CONTAINER_WORKDIR,
+                self.docker_image,
+            ),
             *self.container_command,
         ]
         completed = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -249,11 +252,11 @@ class ArkanaSessionInterface:
         }
 
     def _build_exec_command(self, sCommand: str) -> list[str]:
-        return ["docker", "exec", self.container_name, "sh", "-lc", sCommand]
+        return [*self._docker_cmd("exec", self.container_name, "sh", "-lc", sCommand)]
 
     def _container_exists(self) -> bool:
         completed = subprocess.run(
-            ["docker", "container", "inspect", self.container_name],
+            self._docker_cmd("container", "inspect", self.container_name),
             capture_output=True,
             text=True,
             check=False,
@@ -270,7 +273,7 @@ class ArkanaSessionInterface:
 
     def _ensure_image_available(self) -> None:
         completed = subprocess.run(
-            ["docker", "image", "inspect", self.docker_image],
+            self._docker_cmd("image", "inspect", self.docker_image),
             capture_output=True,
             text=True,
             check=False,
@@ -284,7 +287,7 @@ class ArkanaSessionInterface:
 
     def _container_is_running(self) -> bool:
         completed = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", self.container_name],
+            self._docker_cmd("inspect", "-f", "{{.State.Running}}", self.container_name),
             capture_output=True,
             text=True,
             check=False,
@@ -298,7 +301,7 @@ class ArkanaSessionInterface:
         if not self._container_exists():
             raise RuntimeError("Session container does not exist")
         if not self._container_is_running():
-            completed = subprocess.run(["docker", "start", self.container_name], capture_output=True, text=True, check=False)
+            completed = subprocess.run(self._docker_cmd("start", self.container_name), capture_output=True, text=True, check=False)
             if completed.returncode != 0:
                 raise RuntimeError(completed.stderr.strip() or "Failed to start docker container")
 
@@ -319,3 +322,17 @@ class ArkanaSessionInterface:
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _resolve_docker_bin(self) -> str:
+        configured = os.getenv("ARKANA_DOCKER_BIN")
+        if configured:
+            return configured
+        detected = shutil.which("docker")
+        if detected:
+            return detected
+        raise RuntimeError(
+            "Docker CLI not found in PATH. Install docker in the API container or set ARKANA_DOCKER_BIN."
+        )
+
+    def _docker_cmd(self, *args: str) -> list[str]:
+        return [self.docker_bin, *args]
