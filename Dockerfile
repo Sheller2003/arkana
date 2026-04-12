@@ -10,8 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends docker.io \
-    && ln -sf /usr/bin/docker /usr/local/bin/docker \
+    && apt-get install -y --no-install-recommends docker-cli \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/venv
