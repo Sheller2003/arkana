@@ -10,7 +10,6 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 ALTER TABLE arkana_report_header
   DROP FOREIGN KEY fk_arkana_dashboard_header_object,
-  DROP FOREIGN KEY fk_arkana_dashboard_header_group,
   DROP INDEX idx_arkana_dashboard_header_group;
 
 ALTER TABLE arkana_report_header
@@ -18,10 +17,6 @@ ALTER TABLE arkana_report_header
   ADD CONSTRAINT fk_arkana_report_header_object
     FOREIGN KEY (arkana_id) REFERENCES arkana_object(arkana_id)
     ON DELETE CASCADE
-    ON UPDATE CASCADE,
-  ADD CONSTRAINT fk_arkana_report_header_group
-    FOREIGN KEY (arkana_group) REFERENCES user_group(group_id)
-    ON DELETE SET NULL
     ON UPDATE CASCADE;
 
 ALTER TABLE arkana_report

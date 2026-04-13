@@ -37,12 +37,23 @@ class _DailyUsage:
 
 
 class ArkanaUsageAccounting:
-    def __init__(self, user_id: str, service: str = "arkana", plan_id: PlanId = 0, main_db=None):
+    def __init__(
+        self,
+        user_id: str,
+        service: str = "arkana",
+        plan_id: PlanId = 0,
+        main_db=None,
+        *,
+        supabase_service=None,
+        supabase_access_token: str | None = None,
+    ):
         self.user_id = user_id
         self.service = service
         self._plan_id: PlanId = plan_id
         self._usage: _DailyUsage = _DailyUsage()
         self.main_db = main_db
+        self.supabase_service = supabase_service
+        self.supabase_access_token = supabase_access_token
 
     def _ensure_today(self) -> None:
         # rotate usage on day change
@@ -51,6 +62,8 @@ class ArkanaUsageAccounting:
 
     def load_by_db(self) -> "ArkanaUsageAccounting":
         self._ensure_today()
+        if self.supabase_service is not None:
+            return self
         if self.main_db is None:
             return self
 
@@ -88,6 +101,13 @@ class ArkanaUsageAccounting:
         if nr_of_tokens <= 0:
             return self._usage.tokens_used
         self._ensure_today()
+        if self.supabase_service is not None:
+            self.supabase_service.log_tokens(
+                used_tokens=int(nr_of_tokens),
+                access_token=self.supabase_access_token,
+            )
+            self._usage.tokens_used += nr_of_tokens
+            return self._usage.tokens_used
         if not self.check_for_tokens_available(nr_of_tokens):
             # Still record nothing if not available
             return self._usage.tokens_used
@@ -107,6 +127,8 @@ class ArkanaUsageAccounting:
 
     def check_for_tokens_available(self, nr_of_tokens: int) -> bool:
         self._ensure_today()
+        if self.supabase_service is not None:
+            return True
         info = _plan_info(self._plan_id)
         max_tokens = info["max_tokens"]
         if max_tokens is None:  # unlimited
@@ -116,6 +138,8 @@ class ArkanaUsageAccounting:
 
     def check_for_runtime_available(self, runtime: int) -> bool:
         self._ensure_today()
+        if self.supabase_service is not None:
+            return True
         info = _plan_info(self._plan_id)
         max_runtime = info["max_runtime_seconds"]
         if max_runtime is None:  # unlimited
@@ -138,6 +162,11 @@ class ArkanaUsageAccounting:
 
     def get_daily_max_usage(self) -> dict[str, int]:
         self._ensure_today()
+        if self.supabase_service is not None:
+            return {
+                "runtime_seconds_max": -1,
+                "tokens_max": -1,
+            }
         plan = self.get_user_accounting_plan()
         max_runtime = plan["max_runtime_seconds"]
         max_tokens = plan["max_tokens"]
@@ -157,6 +186,8 @@ class ArkanaUsageAccounting:
         Parameters:
             main_db: ArkanaMainDB instance used to execute the SQL.
         """
+        if self.supabase_service is not None:
+            return
         # Local import to avoid hard dependency at module import time
         try:
             from src.arkana_mdd_db.main_db import ArkanaMainDB  # type: ignore
@@ -197,4 +228,3 @@ class ArkanaUsageAccounting:
                 connection.commit()
             finally:
                 cursor.close()
-

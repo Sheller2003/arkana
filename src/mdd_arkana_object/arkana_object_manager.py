@@ -128,6 +128,7 @@ class ArkanaObjectManager():
             connection_record=db_record.connection,
             credential_db_id=db_record.schema.db_id,
             user_name=runtime_access["user_name"],
+            password=runtime_access.get("password"),
             arkana_user_id=runtime_access["arkana_user_id"],
             is_default=False,
         )

@@ -11,10 +11,15 @@ CREATE TABLE IF NOT EXISTS arkana_user (
   user_name VARCHAR(120) NOT NULL,
   user_role ENUM('root', 'admin', 'editor', 'viewer') NOT NULL DEFAULT 'viewer',
   user_storage_db_id BIGINT NULL,
+  supabase_user_id VARCHAR(120) NULL,
+  supabase_email VARCHAR(255) NULL,
+  auth_provider ENUM('local', 'supabase') NOT NULL DEFAULT 'local',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id),
-  UNIQUE KEY uq_arkana_user_name (user_name)
+  UNIQUE KEY uq_arkana_user_name (user_name),
+  UNIQUE KEY uq_arkana_user_supabase_user_id (supabase_user_id),
+  UNIQUE KEY uq_arkana_user_supabase_email (supabase_email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO arkana_user (
@@ -23,47 +28,6 @@ INSERT IGNORE INTO arkana_user (
   user_role
 ) VALUES
   ('system', 'system', 'root');
-
-CREATE TABLE IF NOT EXISTS user_group (
-  group_id BIGINT NOT NULL AUTO_INCREMENT,
-  group_name VARCHAR(150) NOT NULL,
-  group_description TEXT NULL,
-  group_owner VARCHAR(120) NOT NULL,
-  parent_group_id BIGINT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (group_id),
-  UNIQUE KEY uq_user_group_name (group_name),
-  KEY idx_user_group_parent (parent_group_id),
-  KEY idx_user_group_owner (group_owner),
-  CONSTRAINT fk_user_group_parent
-    FOREIGN KEY (parent_group_id) REFERENCES user_group(group_id)
-    ON DELETE SET NULL
-    ON UPDATE CASCADE,
-  CONSTRAINT fk_user_group_owner
-    FOREIGN KEY (group_owner) REFERENCES arkana_user(user_id)
-    ON DELETE RESTRICT
-    ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS user_group_user (
-  user_group_user_id BIGINT NOT NULL AUTO_INCREMENT,
-  user_id VARCHAR(120) NOT NULL,
-  group_id BIGINT NOT NULL,
-  role VARCHAR(50) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_group_user_id),
-  UNIQUE KEY uq_user_group_user (user_id, group_id),
-  KEY idx_user_group_user_group (group_id),
-  CONSTRAINT fk_user_group_user_user
-    FOREIGN KEY (user_id) REFERENCES arkana_user(user_id)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE,
-  CONSTRAINT fk_user_group_user_group
-    FOREIGN KEY (group_id) REFERENCES user_group(group_id)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS db_connection (
   db_con_id BIGINT NOT NULL AUTO_INCREMENT,
@@ -80,10 +44,6 @@ CREATE TABLE IF NOT EXISTS db_connection (
   PRIMARY KEY (db_con_id),
   KEY idx_db_connection_user_group (user_group),
   KEY idx_db_connection_owner (owner),
-  CONSTRAINT fk_db_connection_user_group
-    FOREIGN KEY (user_group) REFERENCES user_group(group_id)
-    ON DELETE RESTRICT
-    ON UPDATE CASCADE,
   CONSTRAINT fk_db_connection_owner
     FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
     ON DELETE RESTRICT
@@ -113,10 +73,6 @@ CREATE TABLE IF NOT EXISTS db_schema (
   CONSTRAINT fk_db_schema_connection
     FOREIGN KEY (db_con_id) REFERENCES db_connection(db_con_id)
     ON DELETE CASCADE
-    ON UPDATE CASCADE,
-  CONSTRAINT fk_db_schema_user_group
-    FOREIGN KEY (user_group) REFERENCES user_group(group_id)
-    ON DELETE RESTRICT
     ON UPDATE CASCADE,
   CONSTRAINT fk_db_schema_owner
     FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
@@ -180,10 +136,6 @@ CREATE TABLE IF NOT EXISTS arkana_object (
   KEY idx_arkana_object_type (arkana_type),
   KEY idx_arkana_object_auth_group (auth_group),
   KEY idx_arkana_object_modeling_db (modeling_db),
-  CONSTRAINT fk_arkana_object_auth_group
-    FOREIGN KEY (auth_group) REFERENCES user_group(group_id)
-    ON DELETE SET NULL
-    ON UPDATE CASCADE,
   CONSTRAINT fk_arkana_object_type
     FOREIGN KEY (arkana_type) REFERENCES arkana_type(type_key)
     ON DELETE RESTRICT
@@ -202,10 +154,6 @@ CREATE TABLE IF NOT EXISTS arkana_dashboard_header (
   CONSTRAINT fk_arkana_dashboard_header_object
     FOREIGN KEY (arkana_id) REFERENCES arkana_object(arkana_id)
     ON DELETE CASCADE
-    ON UPDATE CASCADE,
-  CONSTRAINT fk_arkana_dashboard_header_group
-    FOREIGN KEY (arkana_group) REFERENCES user_group(group_id)
-    ON DELETE SET NULL
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -257,99 +205,6 @@ SET @sql_add_fk_user_storage_db := IF(
 PREPARE stmt_add_fk_user_storage_db FROM @sql_add_fk_user_storage_db;
 EXECUTE stmt_add_fk_user_storage_db;
 DEALLOCATE PREPARE stmt_add_fk_user_storage_db;
-
-DROP TRIGGER IF EXISTS trg_db_schema_validate_group_insert;
-DROP TRIGGER IF EXISTS trg_db_schema_validate_group_update;
-
-DELIMITER $$
-
-CREATE TRIGGER trg_db_schema_validate_group_insert
-BEFORE INSERT ON db_schema
-FOR EACH ROW
-BEGIN
-  DECLARE connection_group_id BIGINT;
-  DECLARE valid_group_count BIGINT DEFAULT 0;
-
-  SELECT user_group
-    INTO connection_group_id
-    FROM db_connection
-   WHERE db_con_id = NEW.db_con_id;
-
-  IF connection_group_id IS NULL THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'db_connection for db_schema not found';
-  END IF;
-
-  WITH RECURSIVE group_lineage AS (
-    SELECT group_id, parent_group_id
-      FROM user_group
-     WHERE group_id = NEW.user_group
-    UNION ALL
-    SELECT ug.group_id, ug.parent_group_id
-      FROM user_group ug
-      JOIN group_lineage gl ON gl.parent_group_id = ug.group_id
-  )
-  SELECT COUNT(*)
-    INTO valid_group_count
-    FROM group_lineage
-   WHERE group_id = connection_group_id;
-
-  IF valid_group_count = 0 THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'db_schema.user_group must equal db_connection.user_group or be its subgroup';
-  END IF;
-END$$
-
-CREATE TRIGGER trg_db_schema_validate_group_update
-BEFORE UPDATE ON db_schema
-FOR EACH ROW
-BEGIN
-  DECLARE connection_group_id BIGINT;
-  DECLARE valid_group_count BIGINT DEFAULT 0;
-
-  SELECT user_group
-    INTO connection_group_id
-    FROM db_connection
-   WHERE db_con_id = NEW.db_con_id;
-
-  IF connection_group_id IS NULL THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'db_connection for db_schema not found';
-  END IF;
-
-  WITH RECURSIVE group_lineage AS (
-    SELECT group_id, parent_group_id
-      FROM user_group
-     WHERE group_id = NEW.user_group
-    UNION ALL
-    SELECT ug.group_id, ug.parent_group_id
-      FROM user_group ug
-      JOIN group_lineage gl ON gl.parent_group_id = ug.group_id
-  )
-  SELECT COUNT(*)
-    INTO valid_group_count
-    FROM group_lineage
-   WHERE group_id = connection_group_id;
-
-  IF valid_group_count = 0 THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'db_schema.user_group must equal db_connection.user_group or be its subgroup';
-  END IF;
-END$$
-
-DELIMITER ;
-
-INSERT IGNORE INTO user_group (
-  group_id,
-  group_name,
-  group_description,
-  group_owner,
-  parent_group_id
-) VALUES
-  (0, 'default', 'Open for all', 'system', NULL),
-  (1, 'owners_only', 'Allowed for owners only', 'system', 0),
-  (2, 'owners_and_admins', 'Allowed for owners and admins', 'system', 0),
-  (10, 'company_default', 'Company specific default group', 'system', 0);
 
 -- =========================
 -- Conditional migration for existing databases created with older scripts

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
 from src.arkana_api_service.dependencies import get_current_user
 from src.arkana_api_service.routes.help_utils import build_help, with_help
+from src.arkana_auth.amezitUserObject import AmezitUserObject
+from src.arkana_auth.amezit_supabase_service import AmezitSupabaseService, SupabaseClientError
 from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_mdd_db.config import load_env
 from src.arkana_mdd_db.models import DashboardCellRequest, DashboardCreateRequest
@@ -28,12 +31,26 @@ def _get_root_path() -> str:
     return os.getenv("ROOT_PATH", "http://127.0.0.1:8000").rstrip("/")
 
 
+def _normalize_file_content(arkana_id: int, content: str) -> str:
+    normalized_content = str(content or "").strip()
+    if not normalized_content:
+        return normalized_content
+    root_path = _get_root_path()
+    if normalized_content.startswith(("http://", "https://")):
+        parsed = urlparse(normalized_content)
+        file_name = parsed.path.rstrip("/").split("/")[-1]
+        if file_name:
+            return f"{root_path}/report/{arkana_id}/files/{file_name}"
+        return normalized_content
+    return f"{root_path}/report/{arkana_id}/files/{normalized_content}"
+
+
 def _normalize_cell_for_api(arkana_id: int, cell: dict[str, object]) -> dict[str, object]:
     normalized = dict(cell)
     if str(normalized.get("cell_type") or "").lower() == "file":
         content = str(normalized.get("content") or "").strip()
-        if content and not content.startswith("http://") and not content.startswith("https://"):
-            normalized["content"] = f"{_get_root_path()}/report/{arkana_id}/files/{content}"
+        if content:
+            normalized["content"] = _normalize_file_content(arkana_id, content)
     child_cells = normalized.get("cells")
     if isinstance(child_cells, list):
         normalized["cells"] = [
@@ -85,16 +102,26 @@ def create_dashboard(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
-    auth_group = int(request.auth_group or 1)
-    if not current_user.check_user_group_allowed(auth_group):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Arkana object not allowed")
+    is_public = bool(request.public)
+    auth_group = 0 if is_public else None
+    arkana_group = 0 if is_public else None
+    if not is_public and not isinstance(current_user, AmezitUserObject):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Supabase login required for private reports",
+        )
+    if not is_public and not current_user.supabase_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Supabase access token required for private reports",
+        )
 
     board = ArkanaReport(
         arkana_type="report",
         auth_group=auth_group,
         object_key=request.object_key,
         description=request.description,
-        arkana_group=request.arkana_group if request.arkana_group is not None else auth_group,
+        arkana_group=arkana_group,
         user_object=current_user,
     )
     board.cells = []
@@ -110,6 +137,18 @@ def create_dashboard(
             if payload.get("cell_key") is not None:
                 latest["cell_key"] = payload["cell_key"]
     board.save()
+    if not is_public:
+        try:
+            group_id = AmezitSupabaseService.from_env().create_group(
+                group_name=str(board.arkana_id),
+                is_object=True,
+                access_token=current_user.supabase_access_token,
+            )
+        except SupabaseClientError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        board.auth_group = int(group_id)
+        board.arkana_group = int(group_id)
+        board.save()
     return with_help(
         _normalize_cell_for_api(int(board.arkana_id), board.to_json()),
         help_enabled=help,

@@ -37,6 +37,7 @@ class ApiServerConfig:
 class AmezitSupabaseConfig:
     url: str
     anon_key: str
+    service_role_key: str | None = None
     timeout_seconds: float = 10.0
 
 
@@ -67,6 +68,7 @@ def get_amezit_supabase_config(env_file: str | os.PathLike[str] | None = None) -
     return AmezitSupabaseConfig(
         url=_require_env("AMEZIT_SUPABASE_URL"),
         anon_key=_require_env("AMEZIT_SUPABASE_ANON_KEY"),
+        service_role_key=os.getenv("AMEZIT_SUPABASE_SERVICE_ROLE_KEY"),
         timeout_seconds=float(os.getenv("AMEZIT_SUPABASE_TIMEOUT_SECONDS", "10")),
     )
 

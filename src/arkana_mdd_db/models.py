@@ -54,6 +54,14 @@ class PasswordStatusResponse(BaseModel):
     keyring_service: str
 
 
+class CreateGroupRequest(BaseModel):
+    group_name: str = Field(min_length=1)
+
+
+class AssignGroupRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+
+
 class FrameExecuteResponse(BaseModel):
     frame_id: int | None = None
     result: dict[str, Any]
@@ -67,7 +75,8 @@ class DashboardCellRequest(BaseModel):
 
 
 class DashboardCreateRequest(BaseModel):
-    auth_group: int = Field(default=1, ge=1)
+    public: bool = True
+    auth_group: int = Field(default=0, ge=0)
     object_key: str | None = None
     description: str | None = None
     arkana_group: int | None = None

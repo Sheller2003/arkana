@@ -16,6 +16,7 @@ class ArkanaObjectDBConnection:
     connection_record: DBConnectionRecord | None = None
     credential_db_id: int | None = None
     user_name: str | None = None
+    password: str | None = None
     arkana_user_id: str | None = None
     is_default: bool = False
 
@@ -34,6 +35,7 @@ class ArkanaObjectDBConnection:
             self.database,
             credential_db_id=self.credential_db_id,
             user_name=self.user_name,
+            password=self.password,
             arkana_user_id=self.arkana_user_id,
         ) as connection:
             yield connection
@@ -49,6 +51,7 @@ class ArkanaObjectDBConnection:
                 self.database,
                 credential_db_id=self.credential_db_id,
                 user_name=self.user_name,
+                password=self.password,
                 arkana_user_id=self.arkana_user_id,
             ).__enter__()
         return connection, connection.cursor()

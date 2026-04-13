@@ -22,6 +22,8 @@ class AuthUser:
     user_name: str
     user_role: str
     user_storage_db_id: int | None
+    supabase_user_id: str | None = None
+    supabase_email: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,20 +122,13 @@ class ArkanaMainDB:
 
     def get_user_by_name(self, username: str) -> AuthUser | None:
         query = """
-            SELECT user_id, user_name, user_role, user_storage_db_id
+            SELECT user_id, user_name, user_role, user_storage_db_id, supabase_user_id, supabase_email
             FROM arkana_user
             WHERE user_name = %s
             LIMIT 1
         """
         row = self._fetchone(query, (username,))
-        if row is None:
-            return None
-        return AuthUser(
-            user_id=str(row[0]),
-            user_name=str(row[1]),
-            user_role=str(row[2]),
-            user_storage_db_id=int(row[3]) if row[3] is not None else None,
-        )
+        return self._row_to_auth_user(row)
 
     def get_db_schema(self, db_id: int) -> DBSchemaRecord | None:
         query = """
@@ -444,27 +439,7 @@ class ArkanaMainDB:
             return True
         if group_id == 0:
             return True
-
-        query = """
-            WITH RECURSIVE group_lineage AS (
-                SELECT group_id, parent_group_id, group_owner
-                FROM user_group
-                WHERE group_id = %s
-                UNION ALL
-                SELECT ug.group_id, ug.parent_group_id, ug.group_owner
-                FROM user_group ug
-                JOIN group_lineage gl ON gl.parent_group_id = ug.group_id
-            )
-            SELECT COUNT(*)
-            FROM group_lineage gl
-            LEFT JOIN user_group_user ugu
-              ON ugu.group_id = gl.group_id
-             AND ugu.user_id = %s
-            WHERE gl.group_owner = %s
-               OR ugu.user_id IS NOT NULL
-        """
-        row = self._fetchone(query, (group_id, user.user_id, user.user_id))
-        return bool(row and int(row[0]) > 0)
+        return False
 
     def user_can_access_db(self, user: AuthUser, db_id: int) -> bool:
         db_record = self.get_db_schema(db_id)
@@ -544,6 +519,24 @@ class ArkanaMainDB:
             finally:
                 cursor.close()
 
+    def _fetchall(self, query: str, params: tuple[Any, ...]) -> list[tuple[Any, ...]]:
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(query, params)
+                return list(cursor.fetchall() or [])
+            finally:
+                cursor.close()
+
+    def _execute(self, query: str, params: tuple[Any, ...]) -> None:
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(query, params)
+                connection.commit()
+            finally:
+                cursor.close()
+
     def _insert(self, query: str, params: tuple[Any, ...]) -> int:
         with self.connect() as connection:
             cursor = connection.cursor()
@@ -601,4 +594,17 @@ class ArkanaMainDB:
             arkana_user_id=str(row[2]),
             arkana_user_name=str(row[3]),
             db_user_name=str(row[4]),
+        )
+
+    @staticmethod
+    def _row_to_auth_user(row: tuple[Any, ...] | None) -> AuthUser | None:
+        if row is None:
+            return None
+        return AuthUser(
+            user_id=str(row[0]),
+            user_name=str(row[1]),
+            user_role=str(row[2]),
+            user_storage_db_id=int(row[3]) if row[3] is not None else None,
+            supabase_user_id=str(row[4]) if len(row) > 4 and row[4] is not None else None,
+            supabase_email=str(row[5]) if len(row) > 5 and row[5] is not None else None,
         )
