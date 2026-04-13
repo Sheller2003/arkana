@@ -22,6 +22,8 @@ class SupabaseClientTests(unittest.TestCase):
             anon_key="anon-key",
             service_role_key="service-role-key",
             timeout_seconds=5.0,
+            ca_bundle=None,
+            insecure_ssl=False,
         )
         self.client = SupabaseClient(self.config)
 
@@ -157,6 +159,8 @@ class SupabaseClientTests(unittest.TestCase):
                 anon_key="anon-key",
                 service_role_key=None,
                 timeout_seconds=5.0,
+                ca_bundle=None,
+                insecure_ssl=False,
             )
         )
         with patch.object(SupabaseClient, "_request_json", return_value={"ok": True}) as request_json:
@@ -183,6 +187,43 @@ class SupabaseClientTests(unittest.TestCase):
             {"p_used_tokens": 123},
             access_token="token",
         )
+
+    def test_get_group_credential_returns_first_row_from_rpc(self) -> None:
+        with patch.object(
+            SupabaseClient,
+            "call_rpc",
+            return_value=[{"service": "svc", "ext_user_name": "group_user", "pw": "pw123"}],
+        ) as call_rpc:
+            result = self.client.get_group_credential(service="svc", group_id=42, access_token="token")
+
+        self.assertEqual(
+            result,
+            {"service": "svc", "ext_user_name": "group_user", "pw": "pw123"},
+        )
+        call_rpc.assert_called_once_with(
+            "get_group_cred",
+            {"p_group_id": 42, "p_service": "svc"},
+            access_token="token",
+            use_service_role=True,
+        )
+
+    def test_build_ssl_context_uses_unverified_context_when_configured(self) -> None:
+        client = SupabaseClient(
+            AmezitSupabaseConfig(
+                url="https://example.supabase.co",
+                anon_key="anon-key",
+                service_role_key=None,
+                timeout_seconds=5.0,
+                ca_bundle=None,
+                insecure_ssl=True,
+            )
+        )
+
+        with patch("src.arkana_auth.supabase_client.ssl._create_unverified_context", return_value="CTX") as create_ctx:
+            result = client._build_ssl_context()
+
+        self.assertEqual(result, "CTX")
+        create_ctx.assert_called_once_with()
 
 
 class AmezitSupabaseServiceTests(unittest.TestCase):

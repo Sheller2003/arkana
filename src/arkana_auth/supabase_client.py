@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from dataclasses import dataclass
 from urllib import error, request
 
@@ -154,6 +155,16 @@ class SupabaseClient:
             access_token=access_token,
             use_service_role=True,
         )
+        if not isinstance(result, list) or not result:
+            return None
+        row = result[0]
+        if not isinstance(row, dict):
+            return None
+        return {
+            "service": str(row.get("service") or service),
+            "ext_user_name": str(row.get("ext_user_name") or ""),
+            "pw": str(row.get("pw") or ""),
+        }
 
     def get_project_overview(
         self,
@@ -303,7 +314,11 @@ class SupabaseClient:
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
+            with request.urlopen(
+                req,
+                timeout=self.config.timeout_seconds,
+                context=self._build_ssl_context(),
+            ) as response:
                 body = response.read().decode("utf-8")
         except (error.HTTPError, error.URLError, TimeoutError) as exc:
             raise SupabaseClientError(str(exc)) from exc
@@ -313,6 +328,13 @@ class SupabaseClient:
             return json.loads(body)
         except json.JSONDecodeError as exc:
             raise SupabaseClientError("Supabase returned invalid JSON") from exc
+
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        if self.config.insecure_ssl:
+            return ssl._create_unverified_context()
+        if self.config.ca_bundle:
+            return ssl.create_default_context(cafile=self.config.ca_bundle)
+        return ssl.create_default_context()
 
 
 __all__ = ["SupabaseClient", "SupabaseClientError"]

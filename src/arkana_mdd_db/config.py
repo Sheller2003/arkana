@@ -39,6 +39,8 @@ class AmezitSupabaseConfig:
     anon_key: str
     service_role_key: str | None = None
     timeout_seconds: float = 10.0
+    ca_bundle: str | None = None
+    insecure_ssl: bool = False
 
 
 def get_main_db_config(env_file: str | os.PathLike[str] | None = None) -> ArkanaMainDBConfig:
@@ -70,6 +72,8 @@ def get_amezit_supabase_config(env_file: str | os.PathLike[str] | None = None) -
         anon_key=_require_env("AMEZIT_SUPABASE_ANON_KEY"),
         service_role_key=os.getenv("AMEZIT_SUPABASE_SERVICE_ROLE_KEY"),
         timeout_seconds=float(os.getenv("AMEZIT_SUPABASE_TIMEOUT_SECONDS", "10")),
+        ca_bundle=os.getenv("AMEZIT_SUPABASE_CA_BUNDLE") or None,
+        insecure_ssl=os.getenv("AMEZIT_SUPABASE_INSECURE_SSL", "").strip() == "1",
     )
 
 
