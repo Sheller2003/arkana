@@ -5,7 +5,6 @@ import json
 from src.arkana_sphere.arkana_session_manager import ArkanaSessionManager
 from src.arkana_sphere.arkana_session_run_result import ArkanaSessionRunResult
 from src.mdd_arkana_object.cell_types import CellType
-from src.mdd_arkana_object.ark_report import ArkanaReport
 from src.mdd_arkana_object.run_action.action_handler_interface import ActionHandlerInterface
 
 
@@ -31,6 +30,8 @@ class ActionHandlerR(ActionHandlerInterface):
         return "\n".join([*load_commands, cell_value])
 
     def _get_rdata_files(self) -> list[str]:
+        from src.mdd_arkana_object.ark_report import ArkanaReport
+
         report = ArkanaReport(arkana_id=self.get_arkana_id(), user_object=self.user_object).load()
         rdata_files: list[str] = []
         for cell in report.cells or []:
