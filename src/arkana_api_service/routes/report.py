@@ -187,19 +187,6 @@ def _store_uploaded_report_file(
     target_path.write_bytes(payload)
 
 
-def _find_preferred_code_cell_identifier(report: ArkanaReport, *, cell_type: str) -> str | int | None:
-    if report.cells is None:
-        return None
-    preferred_key = str(cell_type)
-    for cell in report.cells:
-        if str(cell.get("cell_key") or "") == preferred_key:
-            return cell.get("cell_id") or preferred_key
-    for cell in report.cells:
-        if str(cell.get("cell_type") or "") == preferred_key:
-            return cell.get("cell_id") or cell.get("cell_key") or preferred_key
-    return None
-
-
 def _normalize_cell_for_api(arkana_id: int, cell: dict[str, object]) -> dict[str, object]:
     normalized = dict(cell)
     cell_type = str(normalized.get("cell_type") or "").lower()
@@ -837,25 +824,12 @@ def upload_report_file(
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code upload must be valid UTF-8 text") from exc
         target_cell_type = CellType.PY_CODE.value if file_suffix == "py" else CellType.R_CODE.value
-        existing_identifier = _find_preferred_code_cell_identifier(report, cell_type=target_cell_type)
-        if existing_identifier is not None:
-            report.update_cell(
-                existing_identifier,
-                {
-                    "cell_type": target_cell_type,
-                    "content": code_content,
-                },
-            )
-        else:
-            report.append_cell(
-                cell_type=target_cell_type,
-                payload=code_content,
-            )
+        report.append_cell(
+            cell_type=target_cell_type,
+            payload=code_content,
+        )
         report.save()
-        if existing_identifier is not None:
-            created_cell = report.get_cell(existing_identifier)
-        else:
-            created_cell = report.cells[-1] if report.cells else None
+        created_cell = report.cells[-1] if report.cells else None
         if created_cell is None:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Uploaded code cell could not be created")
         return with_help(
