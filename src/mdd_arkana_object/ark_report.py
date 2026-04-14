@@ -359,6 +359,7 @@ class ArkanaReport(Arkana_Object_Interface):
             self.cells = []
         order_id = self._next_top_level_order_id()
         next_cell_id = self._next_free_cell_id()
+        normalized_cell_type = self._normalize_file_cell_type(cell_type=cell_type, content=payload)
         self.cells.append(
             {
                 "cell_id": next_cell_id,
@@ -367,7 +368,7 @@ class ArkanaReport(Arkana_Object_Interface):
                 "prev": self.cells[-1].get("cell_id") if self.cells else 0,
                 "depend_by": None,
                 "cell_key": f"cell_{next_cell_id}",
-                "cell_type": str(cell_type),
+                "cell_type": normalized_cell_type,
                 "taggs": tag_str,
                 "content": payload,
             }
@@ -507,7 +508,10 @@ class ArkanaReport(Arkana_Object_Interface):
         # Defaults
         next_cell_id = self._next_free_cell_id()
         cell_key = str(payload.get("cell_key") or f"cell_{next_cell_id}")
-        cell_type = str(payload.get("cell_type") or "text")
+        cell_type = self._normalize_file_cell_type(
+            cell_type=str(payload.get("cell_type") or "text"),
+            content=payload.get("content"),
+        )
 
         # Build new cell dict
         new_cell: dict = {
@@ -568,6 +572,11 @@ class ArkanaReport(Arkana_Object_Interface):
         # Normalize taggs
         if "taggs" in payload:
             payload["taggs"] = self._taggs_to_storage(payload.get("taggs"))
+        if "cell_type" in payload or "content" in payload:
+            payload["cell_type"] = self._normalize_file_cell_type(
+                cell_type=str(payload.get("cell_type") or target_cell.get("cell_type") or "text"),
+                content=payload.get("content", target_cell.get("content")),
+            )
 
         # Apply updates (persisted keys + any extras)
         for k, v in payload.items():
@@ -748,6 +757,10 @@ class ArkanaReport(Arkana_Object_Interface):
         prepared["prev_id"] = parent_prev
         prepared["prev"] = parent_prev
         prepared["depend_by"] = parent_cell_id
+        prepared["cell_type"] = self._normalize_file_cell_type(
+            cell_type=str(prepared.get("cell_type") or ""),
+            content=prepared.get("content"),
+        )
         return prepared
 
     def _build_transient_result_cells(self, parent_cell: dict, result_cells: list[dict]) -> list[dict]:
@@ -774,8 +787,8 @@ class ArkanaReport(Arkana_Object_Interface):
                 remaining_cells.append(cell)
                 continue
             cell_type = str(cell.get("cell_type") or "")
-            if cell_type.endswith("_result") or cell_type == CellType.FILE.value:
-                if cell_type == CellType.FILE.value:
+            if cell_type.endswith("_result") or CellType.is_file_type(cell_type):
+                if CellType.is_file_type(cell_type):
                     existing_file_cells.append(cell)
                 continue
 
@@ -783,7 +796,7 @@ class ArkanaReport(Arkana_Object_Interface):
         existing_file_contents = {str(cell.get("content")) for cell in existing_file_cells}
         merged_result_cells: list[dict] = []
         for cell in new_result_cells:
-            if str(cell.get("cell_type") or "") == CellType.FILE.value and str(cell.get("content")) in existing_file_contents:
+            if CellType.is_file_type(str(cell.get("cell_type") or "")) and str(cell.get("content")) in existing_file_contents:
                 continue
             merged_result_cells.append(cell)
 
@@ -795,6 +808,12 @@ class ArkanaReport(Arkana_Object_Interface):
         self._reindex_cells()
         self._normalize_cell_keys()
         return [cell for cell in self.cells if cell.get("depend_by") == parent_cell_id]
+
+    def _normalize_file_cell_type(self, *, cell_type: str, content) -> str:
+        normalized_type = str(cell_type or "").strip().lower() or CellType.TEXT.value
+        if normalized_type == CellType.FILE.value:
+            return CellType.infer_file_type(content, default=CellType.FILE.value)
+        return normalized_type
 
     def _next_free_cell_id(self) -> int:
         if self.cells is None:

@@ -78,7 +78,7 @@ class ActionHandlerInterface:
             cells.append(
                 {
                     "cell_id": -1,
-                    "cell_type": CellType.FILE.value,
+                    "cell_type": CellType.infer_file_type(file_name, default=CellType.FILE.value),
                     "content": file_name,
                     "file_name": file_name,
                     "session_id": result.session_id,
@@ -119,5 +119,4 @@ def build_action_handler(
     if normalized == CellType.R_CODE.value:
         return ActionHandlerR(assigned_to_arkana_id, field_id, field_value, running_id, user_object)
     return UnsupportedActionHandler(assigned_to_arkana_id, field_id, field_value, running_id, user_object)
-
 

@@ -21,6 +21,9 @@ class AmezitSupabaseService:
     def authenticate_user(self, *, email: str, password: str) -> dict[str, object] | None:
         return self.client.authenticate_user(email=email, password=password)
 
+    def get_authenticated_user(self, *, access_token: str) -> dict[str, object] | None:
+        return self.client.get_authenticated_user(access_token=access_token)
+
     def assign_to_group(self, *, user_id: str, group_id: int, access_token: str | None) -> None:
         self.client.assign_to_group(user_id=user_id, group_id=group_id, access_token=access_token)
 

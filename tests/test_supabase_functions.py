@@ -39,6 +39,19 @@ class SupabaseClientTests(unittest.TestCase):
             bearer_token="anon-key",
         )
 
+    def test_get_authenticated_user_calls_user_endpoint(self) -> None:
+        with patch.object(SupabaseClient, "_request_json", return_value={"id": "user-123"}) as request_json:
+            result = self.client.get_authenticated_user(access_token="token")
+
+        self.assertEqual(result, {"id": "user-123"})
+        request_json.assert_called_once_with(
+            path="/auth/v1/user",
+            payload=None,
+            api_key="anon-key",
+            bearer_token="token",
+            method="GET",
+        )
+
     def test_get_group_membership_ids_collects_positive_matches(self) -> None:
         with patch.object(SupabaseClient, "call_rpc", side_effect=[True, False, True]) as call_rpc:
             result = self.client.get_group_membership_ids(
@@ -238,6 +251,14 @@ class AmezitSupabaseServiceTests(unittest.TestCase):
 
         self.assertEqual(result, {"access_token": "token"})
         self.client.authenticate_user.assert_called_once_with(email="user@example.com", password="secret")
+
+    def test_get_authenticated_user_delegates_to_client(self) -> None:
+        self.client.get_authenticated_user.return_value = {"id": "user-123"}
+
+        result = self.service.get_authenticated_user(access_token="token")
+
+        self.assertEqual(result, {"id": "user-123"})
+        self.client.get_authenticated_user.assert_called_once_with(access_token="token")
 
     def test_check_user_group_allowed_delegates_to_rpc(self) -> None:
         self.client.call_rpc.return_value = True

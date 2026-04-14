@@ -24,6 +24,15 @@ class SupabaseClient:
             bearer_token=self.config.anon_key,
         )
 
+    def get_authenticated_user(self, *, access_token: str) -> dict[str, object] | None:
+        return self._request_json(
+            path="/auth/v1/user",
+            payload=None,
+            api_key=self.config.anon_key,
+            bearer_token=access_token,
+            method="GET",
+        )
+
     def assign_to_group(self, *, user_id: str, group_id: int, access_token: str | None = None) -> None:
         self.call_rpc(
             "assign_to_group",
@@ -296,9 +305,10 @@ class SupabaseClient:
         self,
         *,
         path: str,
-        payload: dict[str, object],
+        payload: dict[str, object] | None,
         api_key: str,
         bearer_token: str | None,
+        method: str = "POST",
     ) -> object:
         endpoint = f"{self.config.url.rstrip('/')}{path}"
         headers = {
@@ -307,12 +317,8 @@ class SupabaseClient:
         }
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
-        req = request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        req = request.Request(endpoint, data=data, headers=headers, method=method)
         try:
             with request.urlopen(
                 req,

@@ -224,7 +224,7 @@ class ArkanaSessionInterface:
 
     @property
     def workspace_key(self) -> str:
-        return f"{self.runtime_type}-{self._slug(self.get_user_id())}-{self._slug(self.arkana_object_id)}"
+        return f"report_{self._slug(self.arkana_object_id)}"
 
     def _build_session_id(self) -> str:
         arkana_id = self._slug(self.arkana_object_id)

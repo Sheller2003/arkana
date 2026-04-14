@@ -9,6 +9,29 @@ from src.arkana_auth.user_object import ArkanaUser
 router = APIRouter(tags=["user"])
 
 
+@router.get("/user/login_check")
+def get_user_login_check(
+    current_user: ArkanaUser = Depends(get_current_user),
+    help: bool = Query(default=False),
+) -> dict[str, object]:
+    return with_help(
+        {
+            "can_login": True,
+            "user_id": current_user.user_id,
+            "user_name": current_user.user_name,
+            "user_role": current_user.user_role,
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/user/login_check",
+            method="GET",
+            description="Validates the provided basic auth credentials and returns the resolved user identity.",
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with login status, user_id, user_name and user_role.",
+        ),
+    )
+
+
 @router.get("/user/usage")
 def get_user_usage(
     current_user: ArkanaUser = Depends(get_current_user),

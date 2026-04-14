@@ -54,6 +54,39 @@ class AmezitUserObject(ArkanaUser):
             supabase_access_token=access_token if isinstance(access_token, str) else None,
         )
 
+    @classmethod
+    def from_access_token(
+        cls,
+        *,
+        main_db: ArkanaMainDB,
+        access_token: str,
+        config: AmezitSupabaseConfig,
+    ) -> "AmezitUserObject | None":
+        service = AmezitSupabaseService.from_config(config)
+        try:
+            user_payload = service.get_authenticated_user(access_token=access_token)
+        except SupabaseClientError:
+            user_payload = None
+        if not isinstance(user_payload, dict):
+            return None
+
+        supabase_user_id = str(user_payload.get("id")) if user_payload.get("id") is not None else None
+        supabase_email = str(user_payload.get("email")) if user_payload.get("email") is not None else None
+        if not supabase_user_id or not supabase_email:
+            return None
+
+        auth_user = cls._resolve_arkana_user(
+            supabase_user_id=supabase_user_id,
+            email=supabase_email,
+        )
+        return cls(
+            main_db=main_db,
+            auth=auth_user,
+            supabase_user_id=supabase_user_id,
+            supabase_email=supabase_email,
+            supabase_access_token=access_token,
+        )
+
     @staticmethod
     def _resolve_arkana_user(*, supabase_user_id: str, email: str) -> AuthUser:
         return AuthUser(

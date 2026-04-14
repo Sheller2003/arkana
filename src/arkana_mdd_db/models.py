@@ -67,17 +67,17 @@ class FrameExecuteResponse(BaseModel):
     result: dict[str, Any]
 
 
-class DashboardCellRequest(BaseModel):
+class ReportCellRequest(BaseModel):
     cell_key: str | None = None
     cell_type: str | None = None
     taggs: list[str] | str | None = None
     content: str | None = None
 
 
-class DashboardCreateRequest(BaseModel):
+class ReportCreateRequest(BaseModel):
     public: bool = True
     auth_group: int = Field(default=0, ge=0)
     object_key: str | None = None
     description: str | None = None
     arkana_group: int | None = None
-    cells: list[DashboardCellRequest] = Field(default_factory=list)
+    cells: list[ReportCellRequest] = Field(default_factory=list)

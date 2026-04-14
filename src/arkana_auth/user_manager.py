@@ -48,6 +48,28 @@ class UserManager:
             self._store_cached_user(cache_key, user)
         return user
 
+    def authenticate_access_token(self, access_token: str) -> ArkanaUser | None:
+        normalized = str(access_token).strip()
+        if not normalized:
+            return None
+        cache_key = self._build_access_token_cache_key(normalized)
+        cached_user = self._load_cached_user(cache_key)
+        if cached_user is not None:
+            return cached_user
+
+        try:
+            config = get_amezit_supabase_config()
+        except RuntimeError:
+            return None
+        user = AmezitUserObject.from_access_token(
+            main_db=self.main_db,
+            access_token=normalized,
+            config=config,
+        )
+        if user is not None:
+            self._store_cached_user(cache_key, user)
+        return user
+
     @staticmethod
     def _is_email_login(username: str) -> bool:
         normalized = str(username).strip()
@@ -78,6 +100,11 @@ class UserManager:
     def _build_cache_key(cls, username: str, password: str) -> str:
         digest = hashlib.sha256(f"{username}\0{password}".encode("utf-8")).hexdigest()
         return f"{username}\0{digest}"
+
+    @classmethod
+    def _build_access_token_cache_key(cls, access_token: str) -> str:
+        digest = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+        return f"bearer\0{digest}"
 
     def _load_cached_user(self, cache_key: str) -> ArkanaUser | None:
         now = time.monotonic()
