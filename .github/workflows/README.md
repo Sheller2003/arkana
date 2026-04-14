@@ -13,6 +13,13 @@ docker compose up -d --build
 - `DEPLOY_USER`
 - `DEPLOY_PATH`
 - `DEPLOY_SSH_KEY`
+- `DEPLOY_KNOWN_HOST`
+
+`DEPLOY_KNOWN_HOST` sollte die feste Host-Key-Zeile des Servers enthalten, z. B.:
+
+```text
+72.61.87.45 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA5wkuLUBA5Bc4KQLRChllUpDcWtsMhb2rh4YJpJIS1E
+```
 
 ## Server-Voraussetzungen
 
