@@ -3,7 +3,7 @@
 Diese Pipeline synchronisiert bei jedem Push auf `main` den Projektstand per `rsync` auf den Server und startet dort:
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
 ```
 
 ## Benötigte GitHub Secrets
@@ -27,3 +27,4 @@ docker compose up -d --build
 - `.env` liegt bereits auf dem Server im Zielordner
 - Docker und Docker Compose sind installiert
 - der SSH-User darf `docker compose` ausführen
+- das externe Docker-Netz `root_default` existiert bereits auf dem Server

@@ -1,0 +1,17 @@
+services:
+  arkana-api:
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=root_default
+      - traefik.http.routers.arkana-api.rule=Host(`arkanan8n.cloud`)
+      - traefik.http.routers.arkana-api.entrypoints=websecure
+      - traefik.http.routers.arkana-api.tls=true
+      - traefik.http.routers.arkana-api.tls.certresolver=mytlschallenge
+      - traefik.http.services.arkana-api.loadbalancer.server.port=8000
+    networks:
+      - default
+      - root_default
+
+networks:
+  root_default:
+    external: true

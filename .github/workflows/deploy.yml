@@ -93,5 +93,5 @@ jobs:
           cd "${DEPLOY_PATH}"
           test -f .env
           mkdir -p arkana_spheres keyring_data
-          docker compose up -d --build
+          docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
           EOF
