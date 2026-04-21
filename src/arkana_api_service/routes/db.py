@@ -75,6 +75,43 @@ def get_db_tables(
     )
 
 
+@router.get("/database/{db_id}/table/{table_key}")
+def get_database_table(
+    db_id: int,
+    table_key: str,
+    current_user: ArkanaUser = Depends(get_current_user),
+    main_db: ArkanaMainDB = Depends(get_main_db),
+    help: bool = Query(default=False),
+) -> dict[str, object]:
+    if not current_user.can_access_db(db_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    try:
+        table_info = main_db.get_table_info(db_id, table_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return with_help(
+        {
+            "database_id": db_id,
+            "table_key": table_key,
+            **table_info,
+        },
+        help_enabled=help,
+        help_payload=build_help(
+            endpoint="/database/{db_id}/table/{table_key}",
+            method="GET",
+            description="Returns a JSON description of a specific table including its columns.",
+            path_parameters={
+                "db_id": "The database id.",
+                "table_key": "The table name/key.",
+            },
+            query_parameters={"help": "Optional. If true, appends endpoint documentation to the response."},
+            returns="JSON object with database_id, table_key, table_name and columns.",
+        ),
+    )
+
+
 @router.post("/db/{db_id}/key_models")
 def get_key_models(
     db_id: int,
