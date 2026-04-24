@@ -6,6 +6,9 @@ Diese Pipeline synchronisiert bei jedem Push auf `main` den Projektstand per `rs
 docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
 ```
 
+Die Basisdatei `docker-compose.yml` bleibt für den bestehenden Direktzugriff auf `:8000`.
+Die server-spezifische Datei `docker-compose.server.yml` ergänzt nur Traefik/HTTPS über `arkanan8n.cloud`.
+
 ## Benötigte GitHub Secrets
 
 - `DEPLOY_HOST`
@@ -28,3 +31,11 @@ docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
 - Docker und Docker Compose sind installiert
 - der SSH-User darf `docker compose` ausführen
 - das externe Docker-Netz `root_default` existiert bereits auf dem Server
+- die Domain `arkanan8n.cloud` zeigt auf den Server und der Traefik-Resolver `mytlschallenge` ist konfiguriert
+
+## Zugriff
+
+Nach dem Deploy bleiben beide Wege parallel aktiv:
+
+- Direktzugriff: `http://<server-ip>:8000`
+- HTTPS über Traefik: `https://arkanan8n.cloud`

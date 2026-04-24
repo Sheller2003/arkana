@@ -109,7 +109,8 @@ CREATE TABLE IF NOT EXISTS arkana_type (
 
 -- Seed basic types
 INSERT IGNORE INTO arkana_type (type_key, type_description) VALUES
-  ('board', 'Dashboard/Board object');
+  ('board', 'Dashboard/Board object'),
+  ('ark_notes', 'Notes/Notion-like page object');
 
 -- Ensure a connection and schema with id 0 exist for the main Arkana DB
 -- Note: We rely on NO_AUTO_VALUE_ON_ZERO set above to allow explicit 0 inserts.
@@ -168,6 +169,36 @@ CREATE TABLE IF NOT EXISTS arkana_dashboard (
   FOREIGN KEY (arkana_id) REFERENCES arkana_object(arkana_id)
   ON DELETE CASCADE
   ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS arkana_notes_header (
+  arkana_id BIGINT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (arkana_id),
+  CONSTRAINT fk_arkana_notes_header_object
+    FOREIGN KEY (arkana_id) REFERENCES arkana_object(arkana_id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS arkana_notes_chapter (
+  arkana_object_id BIGINT NOT NULL,
+  chapter_id BIGINT NOT NULL,
+  order_id INT NOT NULL,
+  chapter_key VARCHAR(150) NOT NULL,
+  taggs VARCHAR(500) NULL,
+  content LONGTEXT NULL,
+  files JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (arkana_object_id, chapter_id),
+  KEY idx_arkana_notes_chapter_order (arkana_object_id, order_id),
+  KEY idx_arkana_notes_chapter_key (arkana_object_id, chapter_key),
+  CONSTRAINT fk_arkana_notes_chapter_object
+    FOREIGN KEY (arkana_object_id) REFERENCES arkana_object(arkana_id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Tracks per-user runtime usage accounting per day

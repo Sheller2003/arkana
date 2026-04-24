@@ -4,6 +4,7 @@
     "function_name": "amezit_cred_decrypt",
     "arguments": "cipher bytea",
     "return_type": "text",
+    "language": "sql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.amezit_cred_decrypt(cipher bytea)\n RETURNS text\n LANGUAGE sql\n STABLE\nAS $function$\n  select pgp_sym_decrypt($1, current_setting('amezit.cred_key', true));\n$function$\n"
   },
   {
@@ -11,104 +12,519 @@
     "function_name": "amezit_cred_encrypt",
     "arguments": "plain text",
     "return_type": "bytea",
+    "language": "sql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.amezit_cred_encrypt(plain text)\n RETURNS bytea\n LANGUAGE sql\n STABLE\nAS $function$\n  select pgp_sym_encrypt($1, current_setting('amezit.cred_key', true), 'compress-algo=1');\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_auth_class_to_pplan",
+    "arguments": "p_pplan_id integer, p_auth_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_auth_obj_to_pplan",
+    "arguments": "p_pplan_id integer, p_auth_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_auth_obj_to_role",
+    "arguments": "p_role_key text, p_auth_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_auth_obj_to_user",
+    "arguments": "p_user_id uuid, p_auth_key text, p_auth_value integer",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_object_group",
+    "arguments": "p_object_key text, p_object_id text, p_group_id integer",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_pplan_to_user",
+    "arguments": "p_user_id uuid, p_pplan_id integer",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_role",
+    "arguments": "p_role_key text, p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "assign_to_group",
     "arguments": "p_user_id uuid, p_group_id integer",
     "return_type": "void",
+    "language": "plpgsql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.assign_to_group(p_user_id uuid, p_group_id integer)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nbegin\n  if not exists (\n    select 1\n    from public.user_group ug\n    where ug.group_id = p_group_id\n      and ug.owner = auth.uid()\n  ) then\n    raise exception 'not group owner';\n  end if;\n\n  insert into public.user_group_assignment(group_id, user_id)\n  values (p_group_id, p_user_id)\n  on conflict (group_id, user_id) do nothing;\nend;\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "assign_to_group",
+    "arguments": "p_user_id uuid, p_group_id integer, p_group_role text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "check_pplan_allows",
+    "arguments": "p_auth_key text, p_pplan_id integer, p_required_value integer",
+    "return_type": "boolean",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "check_user_is_in_group",
     "arguments": "p_group_id integer, p_user_id uuid",
     "return_type": "boolean",
+    "language": "sql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.check_user_is_in_group(p_group_id integer, p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE\nAS $function$\n  select exists (\n    select 1\n    from public.user_group_assignment uga\n    where uga.group_id = p_group_id\n      and uga.user_id = p_user_id\n  );\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "create_auth_obj",
+    "arguments": "p_auth_key text, p_auth_value integer, p_auth_class text, p_is_auth_class boolean, p_auth_description text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "create_group",
+    "arguments": "p_group_name text, p_obj_group boolean, p_parent_group integer, p_object_key text",
+    "return_type": "bigint",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "create_group",
     "arguments": "p_group_name text",
     "return_type": "bigint",
+    "language": "plpgsql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.create_group(p_group_name text)\n RETURNS bigint\n LANGUAGE plpgsql\nAS $function$\ndeclare\n  v_group_id bigint;\nbegin\n  if p_group_name is null or btrim(p_group_name) = '' then\n    raise exception 'group_name cannot be null/empty';\n  end if;\n\n  insert into public.user_group (owner, group_name)\n  values (auth.uid(), p_group_name)\n  returning group_id into v_group_id;\n\n  return v_group_id;\nend;\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "create_payment_plan",
+    "arguments": "p_pplan_name text, p_pplan_description text, p_pplan_lv integer, p_is_active boolean",
+    "return_type": "payment_plan",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "current_user_payment_plan",
+    "arguments": "",
+    "return_type": "integer",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "current_user_role",
+    "arguments": "",
+    "return_type": "text",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "delete_auth_class_to_pplan",
+    "arguments": "p_pplan_id integer, p_auth_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "delete_auth_obj_to_role",
+    "arguments": "p_role_key text, p_auth_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "delete_group",
     "arguments": "p_group_id integer",
     "return_type": "void",
+    "language": "plpgsql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.delete_group(p_group_id integer)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nbegin\n  if not exists (\n    select 1\n    from public.user_group ug\n    where ug.group_id = p_group_id\n      and ug.owner = auth.uid()\n  ) then\n    raise exception 'not group owner';\n  end if;\n\n  delete from public.user_group where group_id = p_group_id;\n  -- assignments are deleted automatically via FK ON DELETE CASCADE\nend;\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "ensure_special_groups",
+    "arguments": "p_owner uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_all_auth_class",
+    "arguments": "",
+    "return_type": "SETOF auth_obj",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_all_auth_objs",
+    "arguments": "",
+    "return_type": "SETOF auth_obj",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_all_pplans",
+    "arguments": "",
+    "return_type": "SETOF payment_plan",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_all_user",
+    "arguments": "",
+    "return_type": "SETOF profiles",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_all_user_groups",
+    "arguments": "",
+    "return_type": "SETOF user_group",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_assigned_auth_classes_pplan",
+    "arguments": "p_pplan_id integer",
+    "return_type": "TABLE(pplan_id integer, auth_key text, auth_value integer, auth_class text, is_auth_class boolean, auth_description text, assigned_at timestamp with time zone)",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_assigned_auth_obj_roles",
+    "arguments": "",
+    "return_type": "TABLE(role_key text, role_name text, auth_key text, auth_value integer, auth_class text, is_auth_class boolean, auth_description text, assigned_at timestamp with time zone)",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "get_chat",
     "arguments": "p_project_id bigint, p_user_id uuid, p_max_entrys integer, p_up_to_date timestamp with time zone",
     "return_type": "jsonb",
-    "function_definition": "CREATE OR REPLACE FUNCTION public.get_chat(p_project_id bigint, p_user_id uuid DEFAULT NULL::uuid, p_max_entrys integer DEFAULT 20, p_up_to_date timestamp with time zone DEFAULT now())\n RETURNS jsonb\n LANGUAGE sql\n STABLE\nAS $function$with base as (\n  select\n    pc.id,\n    pc.project_id,\n    pc.created_at,\n    pc.\"user_id\",\n    pc.response_to_user,\n    pc.message\n  from public.project_chatlog pc\n  where\n    pc.project_id = p_project_id\n    and pc.created_at < coalesce(p_up_to_date, now())\n    and (\n      -- If no user_id is given: return all messages for the project\n      p_user_id is null\n\n      -- If user_id is given: return only\n      --   - user's messages\n      --   - assistant messages that are addressed to that user\n      or (\n        pc.\"user_id\" = p_user_id\n        or (\n          pc.\"user_id\" = '484d7db2-17da-4769-bc3a-23b3a2d54ad2'::uuid\n          and pc.response_to_user = p_user_id\n        )\n      )\n    )\n),\nranked as (\n  select\n    b.*,\n    row_number() over (order by b.created_at desc, b.id desc) as rn\n  from base b\n),\nchosen as (\n  select *\n  from ranked\n  where\n    coalesce(p_max_entrys, 20) = 0\n    or rn <= coalesce(p_max_entrys, 20)\n),\nfinal_rows as (\n  -- re-order ascending for chat display\n  select\n    id,\n    project_id,\n    created_at,\n    case\n      when \"user_id\" = '484d7db2-17da-4769-bc3a-23b3a2d54ad2'::uuid then '__assistant__'\n      else \"user_id\"::text\n    end as \"user_id\",\n    response_to_user,\n    message\n  from chosen\n  order by created_at asc, id asc\n)\nselect coalesce(jsonb_agg(to_jsonb(final_rows)), '[]'::jsonb)\nfrom final_rows;$function$\n"
+    "language": "sql",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.get_chat(p_project_id bigint, p_user_id uuid DEFAULT NULL::uuid, p_max_entrys integer DEFAULT 20, p_up_to_date timestamp with time zone DEFAULT now())\n RETURNS jsonb\n LANGUAGE sql\n STABLE\nAS $function$with base as (\n  select\n    pc.id,\n    pc.project_id,\n    pc.created_at,\n    pc.\"user_id\",\n    pc.response_to_user,\n    pc.message\n  from public.project_chatlog pc\n  where\n    pc.project_id = p_project_id\n    and pc.created_at < coalesce(p_up_to_date, now())\n    and (\n      p_user_id is null\n      or (\n        pc.\"user_id\" = p_user_id\n        or (\n          pc.\"user_id\" = '484d7db2-17da-4769-bc3a-23b3a2d54ad2'::uuid\n          and pc.response_to_user = p_user_id\n        )\n      )\n    )\n),\nranked as (\n  select\n    b.*,\n    row_number() over (order by b.created_at desc, b.id desc) as rn\n  from base b\n),\nchosen as (\n  select *\n  from ranked\n  where\n    coalesce(p_max_entrys, 20) = 0\n    or rn <= coalesce(p_max_entrys, 20)\n),\nfinal_rows as (\n  select\n    id,\n    project_id,\n    created_at,\n    case\n      when \"user_id\" = '484d7db2-17da-4769-bc3a-23b3a2d54ad2'::uuid then '__assistant__'\n      else \"user_id\"::text\n    end as \"user_id\",\n    response_to_user,\n    message\n  from chosen\n  order by created_at asc, id asc\n)\nselect coalesce(jsonb_agg(to_jsonb(final_rows)), '[]'::jsonb)\nfrom final_rows;$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_effective_user_payment_plan",
+    "arguments": "p_user_id uuid",
+    "return_type": "TABLE(user_id uuid, company_id bigint, pplan_id integer)",
+    "language": "sql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "get_group_cred",
     "arguments": "p_group_id integer, p_service text",
     "return_type": "TABLE(group_id integer, service text, ext_user_name text, pw text)",
+    "language": "sql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.get_group_cred(p_group_id integer, p_service text)\n RETURNS TABLE(group_id integer, service text, ext_user_name text, pw text)\n LANGUAGE sql\n STABLE\nAS $function$select\n    gc.group_id,\n    gc.service,\n    case when gc.ext_user_name_enc is null then null\n         else public.amezit_cred_decrypt(gc.ext_user_name_enc)\n    end as ext_user_name,\n    public.amezit_cred_decrypt(gc.pw_enc) as pw\n  from public.group_cred gc\n  where gc.group_id = p_group_id\n    and gc.service = p_service$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_group_info",
+    "arguments": "p_group_id bigint",
+    "return_type": "jsonb",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "get_group_members",
     "arguments": "p_group_id integer",
     "return_type": "SETOF uuid",
+    "language": "sql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.get_group_members(p_group_id integer)\n RETURNS SETOF uuid\n LANGUAGE sql\nAS $function$\n  select uga.user_id\n  from public.user_group_assignment uga\n  where uga.group_id = p_group_id\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_groups",
+    "arguments": "p_group_id integer",
+    "return_type": "SETOF user_group",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_my_groups",
+    "arguments": "",
+    "return_type": "SETOF user_group",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_own_auth",
+    "arguments": "",
+    "return_type": "jsonb",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_own_max_limits",
+    "arguments": "",
+    "return_type": "jsonb",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_own_user_data",
+    "arguments": "",
+    "return_type": "profiles",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_payment_plan_auth_obj_assignment",
+    "arguments": "p_pplan_id integer",
+    "return_type": "TABLE(pplan_id integer, auth_key text, auth_value integer, auth_class text, is_auth_class boolean, auth_description text, assigned_at timestamp with time zone)",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_pplan_limits",
+    "arguments": "p_pplan_id integer",
+    "return_type": "jsonb",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "get_project_overview",
     "arguments": "p_company_id integer, p_user_id text",
     "return_type": "jsonb",
-    "function_definition": "CREATE OR REPLACE FUNCTION public.get_project_overview(p_company_id integer, p_user_id text DEFAULT ''::text)\n RETURNS jsonb\n LANGUAGE plpgsql\n STABLE\nAS $function$declare\n  v_result jsonb;\nbegin\n  /*\n    Regeln:\n    - Wenn p_company_id = 1: alle Projekte zurückgeben\n    - Sonst:\n      - Wenn p_user_id = '' (oder NULL/Whitespace): alle Projekte der company\n      - Wenn p_user_id != '': nur Projekte der company, die zu user gehören\n    Rückgabe: JSON-Array (Liste)\n  */\n\n  select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb)\n    into v_result\n  from (\n    select *\n    from public.project_information pi\n    where\n      (p_company_id = 1)\n      or (\n        pi.company_id = p_company_id\n        and (\n          nullif(btrim(p_user_id), '') is null\n          or pi.user_id_auth = p_user_id\n        )\n      )\n    order by pi.created_at desc\n  ) as t;\n\n  return v_result;\nend;$function$\n"
+    "language": "plpgsql",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.get_project_overview(p_company_id integer, p_user_id text DEFAULT ''::text)\n RETURNS jsonb\n LANGUAGE plpgsql\n STABLE\nAS $function$declare\n  v_result jsonb;\nbegin\n  select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb)\n    into v_result\n  from (\n    select *\n    from public.project_information pi\n    where\n      (p_company_id = 1)\n      or (\n        pi.company_id = p_company_id\n        and (\n          nullif(btrim(p_user_id), '') is null\n          or pi.user_id_auth = p_user_id\n        )\n      )\n    order by pi.created_at desc\n  ) as t;\n\n  return v_result;\nend;$function$\n"
   },
   {
     "schema_name": "public",
     "function_name": "get_project_parameters_json",
     "arguments": "p_project_id bigint, p_env_id smallint",
     "return_type": "jsonb",
-    "function_definition": "CREATE OR REPLACE FUNCTION public.get_project_parameters_json(p_project_id bigint, p_env_id smallint DEFAULT NULL::smallint)\n RETURNS jsonb\n LANGUAGE sql\n STABLE\nAS $function$\nwith cust as (\n  select\n    cpp.param_group,\n    cpp.param_key,\n    cpp.param_is_iterable,\n    cpp.env_id\n  from public.cust_project_params cpp\n  where p_env_id is null or cpp.env_id = p_env_id\n),\njoined as (\n  select\n    c.param_group,\n    c.param_key,\n    c.param_is_iterable,\n\n    -- collect all non-empty values for this parameter (supports iterable params)\n    coalesce(\n      jsonb_agg(pp.parameter_value order by pp.id)\n        filter (where pp.parameter_value is not null and btrim(pp.parameter_value) <> ''),\n      '[]'::jsonb\n    ) as values,\n\n    -- \"filled\" means at least one non-empty value exists\n    bool_or(pp.parameter_value is not null and btrim(pp.parameter_value) <> '') as is_filled\n  from cust c\n  left join public.project_params pp\n    on  pp.project_id = p_project_id\n    and pp.parameter_group = c.param_group\n    and pp.parameter_name  = c.param_key\n  group by\n    c.param_group, c.param_key, c.param_is_iterable\n),\nall_params as (\n  select\n    jsonb_agg(\n      jsonb_build_object(\n        'parameter_group', param_group,\n        'parameter_name',  param_key,\n        'is_iterable',     param_is_iterable,\n        'values',          values\n      )\n      order by param_group, param_key\n    ) as parameters,\n    jsonb_agg(\n      jsonb_build_object(\n        'parameter_group', param_group,\n        'parameter_name',  param_key,\n        'is_iterable',     param_is_iterable\n      )\n      order by param_group, param_key\n    ) filter (where coalesce(is_filled, false) = false) as open_parameters\n  from joined\n)\nselect jsonb_build_object(\n  'parameters',      coalesce(parameters, '[]'::jsonb),\n  'openParameters',  coalesce(open_parameters, '[]'::jsonb)\n)\nfrom all_params;\n$function$\n"
+    "language": "sql",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.get_project_parameters_json(p_project_id bigint, p_env_id smallint DEFAULT NULL::smallint)\n RETURNS jsonb\n LANGUAGE sql\n STABLE\nAS $function$\nwith cust as (\n  select\n    cpp.param_group,\n    cpp.param_key,\n    cpp.param_is_iterable,\n    cpp.env_id\n  from public.cust_project_params cpp\n  where p_env_id is null or cpp.env_id = p_env_id\n),\njoined as (\n  select\n    c.param_group,\n    c.param_key,\n    c.param_is_iterable,\n    coalesce(\n      jsonb_agg(pp.parameter_value order by pp.id)\n        filter (where pp.parameter_value is not null and btrim(pp.parameter_value) <> ''),\n      '[]'::jsonb\n    ) as values,\n    bool_or(pp.parameter_value is not null and btrim(pp.parameter_value) <> '') as is_filled\n  from cust c\n  left join public.project_params pp\n    on  pp.project_id = p_project_id\n    and pp.parameter_group = c.param_group\n    and pp.parameter_name  = c.param_key\n  group by\n    c.param_group, c.param_key, c.param_is_iterable\n),\nall_params as (\n  select\n    jsonb_agg(\n      jsonb_build_object(\n        'parameter_group', param_group,\n        'parameter_name',  param_key,\n        'is_iterable',     param_is_iterable,\n        'values',          values\n      )\n      order by param_group, param_key\n    ) as parameters,\n    jsonb_agg(\n      jsonb_build_object(\n        'parameter_group', param_group,\n        'parameter_name',  param_key,\n        'is_iterable',     param_is_iterable\n      )\n      order by param_group, param_key\n    ) filter (where coalesce(is_filled, false) = false) as open_parameters\n  from joined\n)\nselect jsonb_build_object(\n  'parameters',      coalesce(parameters, '[]'::jsonb),\n  'openParameters',  coalesce(open_parameters, '[]'::jsonb)\n)\nfrom all_params;\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_runtime_usage_period_start",
+    "arguments": "p_period_key text, p_ref_ts timestamp with time zone",
+    "return_type": "date",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_user_auth",
+    "arguments": "p_user_id uuid",
+    "return_type": "jsonb",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "get_user_cred",
     "arguments": "p_service text",
     "return_type": "TABLE(service text, ext_user_name text, pw text)",
+    "language": "sql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.get_user_cred(p_service text)\n RETURNS TABLE(service text, ext_user_name text, pw text)\n LANGUAGE sql\n STABLE\nAS $function$\n  select\n    uc.service,\n    public.amezit_cred_decrypt(uc.ext_user_name_enc) as ext_user_name,\n    public.amezit_cred_decrypt(uc.pw_enc) as pw\n  from public.user_cred uc\n  where uc.service = p_service\n    and uc.user_id = auth.uid()\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "get_user_roles",
+    "arguments": "",
+    "return_type": "SETOF user_role",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "getprojectmodel",
     "arguments": "p_project_id bigint",
     "return_type": "jsonb",
-    "function_definition": "CREATE OR REPLACE FUNCTION public.getprojectmodel(p_project_id bigint)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO 'public', 'pg_temp'\nAS $function$declare\n  result jsonb;\nbegin\n  select jsonb_build_object(\n    'project_id', pi.project_id,\n    'project_title', pi.project_title,\n    'created_at', pi.created_at,\n\n    'owner', jsonb_build_object(\n      'user_id', pi.user_id,\n      'user_id_auth', pi.user_id_auth,\n      'profile', (\n        select to_jsonb(pr.*)\n        from public.profiles pr\n        where pr.user_id_auth = pi.user_id_auth\n        limit 1\n      )\n    ),\n\n    'chatMessages', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n           'id', pcl.id,\n           'created_at', pcl.created_at,\n           'user_text', pcl.user_text,\n           'ai_response', pcl.ai_response\n         ) order by pcl.created_at\n       )\n       from public.\"projectChatLog\" pcl\n       where pcl.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n\n    'projectParameters', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n           'id', pp.id,\n           'created_at', pp.created_at,\n           'parameter_group', pp.parameter_group,\n           'parameter_name', pp.parameter_name,\n           'parameter_value', pp.parameter_value\n         ) order by pp.created_at\n       )\n       from public.project_params pp\n       where pp.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n\n    'customParameterDefinitions', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n           'param_key', cpp.param_key,\n           'param_group', cpp.param_group,\n           'param_is_iterable', cpp.param_is_iterable\n         )\n       )\n       from public.cust_project_params cpp),\n      '[]'::jsonb\n    ),\n\n    'projectFiles', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', pf.id,\n            'file_path', pf.file_path,\n            'content', pf.content,\n            'user_id', pf.user_id\n         )\n       )\n       from public.project_files pf\n       where pf.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n\n    'changelog', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', cl.id,\n            'title', cl.title,\n            'description', cl.description,\n            'created_at', cl.created_at\n         ) order by cl.created_at desc\n       )\n       from public.changelog cl\n       where cl.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n\n    'userFeedback', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', uf.id,\n            'user_id', uf.user_id,\n            'feedback_text', uf.feedback_text,\n            'created_at', uf.created_at\n         ) order by uf.created_at desc\n       )\n       from public.user_feedback uf\n       where uf.user_id = pi.user_id),\n      '[]'::jsonb\n    ),\n\n    'templates', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', t.id,\n            'file_name', t.file_name,\n            'content', t.content\n         )\n       )\n       from public.template t),\n      '[]'::jsonb\n    ),\n\n    'nextGenerationPrompt', coalesce(\n      (select pcl.user_text\n       from public.\"projectChatLog\" pcl\n       where pcl.project_id = pi.project_id\n       order by pcl.created_at desc\n       limit 1),\n      ''\n    )\n  )\n  into result\n  from public.project_information pi\n  where pi.project_id = p_project_id;\n\n  return coalesce(result, '{}'::jsonb);\nend;$function$\n"
+    "language": "plpgsql",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.getprojectmodel(p_project_id bigint)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO 'public', 'pg_temp'\nAS $function$declare\n  result jsonb;\nbegin\n  select jsonb_build_object(\n    'project_id', pi.project_id,\n    'project_title', pi.project_title,\n    'created_at', pi.created_at,\n    'owner', jsonb_build_object(\n      'user_id', pi.user_id,\n      'user_id_auth', pi.user_id_auth,\n      'profile', (\n        select to_jsonb(pr.*)\n        from public.profiles pr\n        where pr.user_id_auth = pi.user_id_auth\n        limit 1\n      )\n    ),\n    'chatMessages', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n           'id', pcl.id,\n           'created_at', pcl.created_at,\n           'user_text', pcl.user_text,\n           'ai_response', pcl.ai_response\n         ) order by pcl.created_at\n       )\n       from public.\"projectChatLog\" pcl\n       where pcl.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n    'projectParameters', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n           'id', pp.id,\n           'created_at', pp.created_at,\n           'parameter_group', pp.parameter_group,\n           'parameter_name', pp.parameter_name,\n           'parameter_value', pp.parameter_value\n         ) order by pp.created_at\n       )\n       from public.project_params pp\n       where pp.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n    'customParameterDefinitions', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n           'param_key', cpp.param_key,\n           'param_group', cpp.param_group,\n           'param_is_iterable', cpp.param_is_iterable\n         )\n       )\n       from public.cust_project_params cpp),\n      '[]'::jsonb\n    ),\n    'projectFiles', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', pf.id,\n            'file_path', pf.file_path,\n            'content', pf.content,\n            'user_id', pf.user_id\n         )\n       )\n       from public.project_files pf\n       where pf.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n    'changelog', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', cl.id,\n            'title', cl.title,\n            'description', cl.description,\n            'created_at', cl.created_at\n         ) order by cl.created_at desc\n       )\n       from public.changelog cl\n       where cl.project_id = pi.project_id),\n      '[]'::jsonb\n    ),\n    'userFeedback', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', uf.id,\n            'user_id', uf.user_id,\n            'feedback_text', uf.feedback_text,\n            'created_at', uf.created_at\n         ) order by uf.created_at desc\n       )\n       from public.user_feedback uf\n       where uf.user_id = pi.user_id),\n      '[]'::jsonb\n    ),\n    'templates', coalesce(\n      (select jsonb_agg(\n         jsonb_build_object(\n            'id', t.id,\n            'file_name', t.file_name,\n            'content', t.content\n         )\n       )\n       from public.template t),\n      '[]'::jsonb\n    ),\n    'nextGenerationPrompt', coalesce(\n      (select pcl.user_text\n       from public.\"projectChatLog\" pcl\n       where pcl.project_id = pi.project_id\n       order by pcl.created_at desc\n       limit 1),\n      ''\n    )\n  )\n  into result\n  from public.project_information pi\n  where pi.project_id = p_project_id;\n\n  return coalesce(result, '{}'::jsonb);\nend;$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "has_auth_class_assignment",
+    "arguments": "p_user_id uuid, p_auth_class text",
+    "return_type": "boolean",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "has_effective_auth",
+    "arguments": "p_user_id uuid, p_auth_key text, p_required_value integer",
+    "return_type": "boolean",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "is_root_user",
+    "arguments": "p_user_id uuid",
+    "return_type": "boolean",
+    "language": "sql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "leave_group",
+    "arguments": "p_group_id integer, p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "log_runtime_usage",
+    "arguments": "p_service_key text, p_runtime_value integer, p_source_ref text, p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "log_token_usage",
+    "arguments": "p_model_key text, p_used_tokens bigint, p_source_ref text, p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "log_tokens",
     "arguments": "p_used_tokens integer",
     "return_type": "void",
+    "language": "plpgsql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.log_tokens(p_used_tokens integer)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  m record;\n  used integer;\n  next_used integer;\nBEGIN\n  IF p_used_tokens IS NULL OR p_used_tokens <= 0 THEN\n    RAISE EXCEPTION 'used_tokens must be a positive integer';\n  END IF;\n\n  SELECT * INTO m FROM public._get_user_payment_model_level();\n  IF NOT FOUND THEN\n    RAISE EXCEPTION 'No payment model found for user %', auth.uid();\n  END IF;\n\n  SELECT COALESCE(SUM(tokens), 0)\n  INTO used\n  FROM public.amezit_runtime_usage uur\n  WHERE uur.uuid = auth.uid()\n    AND uur.day = CURRENT_DATE;\n\n  next_used := used + p_used_tokens;\n\n  IF NOT COALESCE(m.infinity_tokens, false) THEN\n    IF next_used > COALESCE(m.max_tokens_per_d, 0) THEN\n      RAISE EXCEPTION 'Daily token limit exceeded';\n    END IF;\n  END IF;\n\n  INSERT INTO public.amezit_runtime_usage (uuid, day, runtime, tokens)\n  VALUES (auth.uid(), CURRENT_DATE, 0, p_used_tokens)\n  ON CONFLICT (uuid, day)\n  DO UPDATE SET\n    tokens = public.amezit_runtime_usage.tokens + EXCLUDED.tokens,\n    runtime = public.amezit_runtime_usage.runtime;\nEND;\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "remove_company_payed_service",
+    "arguments": "p_company_id bigint, p_pservice_id integer",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "remove_from_group",
+    "arguments": "p_group_id integer, p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "require_effective_auth",
+    "arguments": "p_auth_key text, p_required_value integer, p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "require_root_user",
+    "arguments": "p_user_id uuid",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "set_company_payed_service",
+    "arguments": "p_company_id bigint, p_pservice_id integer",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "set_group_cred",
     "arguments": "p_service text, p_group_id integer, p_pwd text, p_ext_user_name text",
     "return_type": "void",
-    "function_definition": "CREATE OR REPLACE FUNCTION public.set_group_cred(p_service text, p_group_id integer, p_pwd text, p_ext_user_name text)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nbegin\n  -- must be assigned to group_id\n  if not exists (\n    select 1\n    from public.tableuser_group tg\n    where tg.group_id = p_group_id\n      and tg.user_id = auth.uid()\n  ) then\n    raise exception 'not assigned to group_id %', p_group_id;\n  end if;\n\n  -- upsert group credentials\n  insert into public.group_cred(group_id, service, ext_user_name_enc, pw_enc, created_at, updated_at)\n  values (\n    p_group_id,\n    p_service,\n    case when p_ext_user_name is null then null else public.amezit_cred_encrypt(p_ext_user_name) end,\n    public.amezit_cred_encrypt(p_pwd),\n    now(),\n    now()\n  )\n  on conflict (group_id, service) do update\n  set\n    ext_user_name_enc = excluded.ext_user_name_enc,\n    pw_enc = excluded.pw_enc,\n    updated_at = now();\nend;\n$function$\n"
+    "language": "plpgsql",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.set_group_cred(p_service text, p_group_id integer, p_pwd text, p_ext_user_name text)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nbegin\n  if not exists (\n    select 1\n    from public.tableuser_group tg\n    where tg.group_id = p_group_id\n      and tg.user_id = auth.uid()\n  ) then\n    raise exception 'not assigned to group_id %', p_group_id;\n  end if;\n\n  insert into public.group_cred(group_id, service, ext_user_name_enc, pw_enc, created_at, updated_at)\n  values (\n    p_group_id,\n    p_service,\n    case when p_ext_user_name is null then null else public.amezit_cred_encrypt(p_ext_user_name) end,\n    public.amezit_cred_encrypt(p_pwd),\n    now(),\n    now()\n  )\n  on conflict (group_id, service) do update\n  set\n    ext_user_name_enc = excluded.ext_user_name_enc,\n    pw_enc = excluded.pw_enc,\n    updated_at = now();\nend;\n$function$\n"
+  },
+  {
+    "schema_name": "public",
+    "function_name": "set_runtime_limit_for_pplan",
+    "arguments": "p_pplan_id integer, p_service_key text, p_max_value integer, p_infinit boolean, p_period_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "set_token_limit_for_pplan",
+    "arguments": "p_pplan_id integer, p_model_key text, p_max_tokens bigint, p_infinit boolean, p_period_key text",
+    "return_type": "void",
+    "language": "plpgsql",
+    "function_definition": null
+  },
+  {
+    "schema_name": "public",
+    "function_name": "set_updated_at",
+    "arguments": "",
+    "return_type": "trigger",
+    "language": "plpgsql",
+    "function_definition": null
   },
   {
     "schema_name": "public",
     "function_name": "set_user_cred",
     "arguments": "p_service text, p_pwd text, p_ext_user_name text",
     "return_type": "void",
+    "language": "plpgsql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.set_user_cred(p_service text, p_pwd text, p_ext_user_name text)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$begin\n  insert into public.user_cred(user_id, service, ext_user_name_enc, pw_enc, created_at, updated_at)\n  values (\n    auth.uid(),\n    p_service,\n    case when p_ext_user_name is null then null else public.amezit_cred_encrypt(p_ext_user_name) end,\n    public.amezit_cred_encrypt(p_pwd),\n    now(),\n    now()\n  )\n  on conflict (user_id, service) do update\n  set\n    ext_user_name_enc = excluded.ext_user_name_enc,\n    pw_enc = excluded.pw_enc,\n    updated_at = now();\nend;$function$\n"
   },
   {
@@ -116,6 +532,7 @@
     "function_name": "start_chat_session",
     "arguments": "p_owner_id uuid, p_project_id bigint, p_chat_action_type chat_action_types",
     "return_type": "chat_sessions",
+    "language": "plpgsql",
     "function_definition": "CREATE OR REPLACE FUNCTION public.start_chat_session(p_owner_id uuid, p_project_id bigint, p_chat_action_type chat_action_types)\n RETURNS chat_sessions\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n    v_company_id bigint;\n    v_new_chat public.chat_sessions;\nbegin\n    select p.company_id::bigint\n      into v_company_id\n      from public.profiles p\n     where p.user_id_auth = p_owner_id\n     limit 1;\n\n    if not found then\n        raise exception 'No profile found for owner_id %', p_owner_id;\n    end if;\n\n    if v_company_id is null then\n        raise exception 'Profile found, but company_id is null for owner_id %', p_owner_id;\n    end if;\n\n    insert into public.chat_sessions (\n        owner_id,\n        project_id,\n        chat_action_type,\n        company_id\n    )\n    values (\n        p_owner_id,\n        p_project_id,\n        p_chat_action_type,\n        v_company_id\n    )\n    returning * into v_new_chat;\n\n    return v_new_chat;\nend;\n$function$\n"
   },
   {
@@ -123,6 +540,7 @@
     "function_name": "update_parameters",
     "arguments": "p_project_id bigint, p_group_key text, p_param_name text, p_param_value text",
     "return_type": "jsonb",
-    "function_definition": "CREATE OR REPLACE FUNCTION public.update_parameters(p_project_id bigint, p_group_key text, p_param_name text, p_param_value text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_group text := lower(btrim(coalesce(p_group_key, '')));\n  v_name  text := lower(btrim(coalesce(p_param_name, '')));\n  v_allowed boolean;\n  v_rows int8;\nbegin\n  if p_project_id is null then\n    raise exception 'p_project_id must not be null';\n  end if;\n\n  if v_group = '' then\n    raise exception 'p_group_key must not be empty';\n  end if;\n\n  if v_name = '' then\n    raise exception 'p_param_name must not be empty';\n  end if;\n\n  -- Only allow keys that exist in cust_project_params (case-insensitive via lower())\n  select exists (\n    select 1\n    from public.cust_project_params c\n    where lower(c.param_group) = v_group\n      and lower(c.param_key)   = v_name\n  )\n  into v_allowed;\n\n  if not v_allowed then\n    return jsonb_build_object(\n      'status', 'skipped',\n      'reason', 'param_key not allowed by cust_project_params',\n      'project_id', p_project_id,\n      'parameter_group', v_group,\n      'parameter_name', v_name\n    );\n  end if;\n\n  -- Upsert with normalized (lowercased) keys\n  insert into public.project_params (\n    project_id,\n    parameter_group,\n    parameter_name,\n    parameter_value\n  )\n  values (\n    p_project_id,\n    v_group,\n    v_name,\n    p_param_value\n  )\n  on conflict (project_id, parameter_group, parameter_name)\n  do update set\n    parameter_value = excluded.parameter_value;\n\n  get diagnostics v_rows = row_count;\n\n  return jsonb_build_object(\n    'status', 'ok',\n    'affected_rows', v_rows,\n    'project_id', p_project_id,\n    'parameter_group', v_group,\n    'parameter_name', v_name\n  );\nend;\n$function$\n"
+    "language": "plpgsql",
+    "function_definition": "CREATE OR REPLACE FUNCTION public.update_parameters(p_project_id bigint, p_group_key text, p_param_name text, p_param_value text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_group text := lower(btrim(coalesce(p_group_key, '')));\n  v_name  text := lower(btrim(coalesce(p_param_name, '')));\n  v_allowed boolean;\n  v_rows int8;\nbegin\n  if p_project_id is null then\n    raise exception 'p_project_id must not be null';\n  end if;\n\n  if v_group = '' then\n    raise exception 'p_group_key must not be empty';\n  end if;\n\n  if v_name = '' then\n    raise exception 'p_param_name must not be empty';\n  end if;\n\n  select exists (\n    select 1\n    from public.cust_project_params c\n    where lower(c.param_group) = v_group\n      and lower(c.param_key)   = v_name\n  )\n  into v_allowed;\n\n  if not v_allowed then\n    return jsonb_build_object(\n      'status', 'skipped',\n      'reason', 'param_key not allowed by cust_project_params',\n      'project_id', p_project_id,\n      'parameter_group', v_group,\n      'parameter_name', v_name\n    );\n  end if;\n\n  insert into public.project_params (\n    project_id,\n    parameter_group,\n    parameter_name,\n    parameter_value\n  )\n  values (\n    p_project_id,\n    v_group,\n    v_name,\n    p_param_value\n  )\n  on conflict (project_id, parameter_group, parameter_name)\n  do update set\n    parameter_value = excluded.parameter_value;\n\n  get diagnostics v_rows = row_count;\n\n  return jsonb_build_object(\n    'status', 'ok',\n    'affected_rows', v_rows,\n    'project_id', p_project_id,\n    'parameter_group', v_group,\n    'parameter_name', v_name\n  );\nend;\n$function$\n"
   }
 ]

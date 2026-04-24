@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
+from src.arkana_api_service.route_auth import require_route_auth
 from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_api_service.dependencies import get_current_user
 from src.arkana_api_service.routes.help_utils import build_help, with_help
@@ -11,9 +12,10 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def health(
-    _: ArkanaUser = Depends(get_current_user),
+    current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "health")
     return with_help(
         {"status": "ok"},
         help_enabled=help,

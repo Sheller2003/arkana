@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from src.arkana_api_service.route_auth import require_route_auth
 from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_api_service.dependencies import get_current_user, get_main_db
 from src.arkana_api_service.routes.help_utils import build_help, with_help
@@ -15,10 +16,11 @@ router = APIRouter(tags=["frames"])
 @router.post("/frames/execute", status_code=status.HTTP_200_OK)
 def execute_frame(
     request: FrameExecuteRequest,
-    _: ArkanaUser = Depends(get_current_user),
+    current_user: ArkanaUser = Depends(get_current_user),
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "execute_frame")
     executor = FrameExecutor(main_db)
     try:
         result = executor.execute(

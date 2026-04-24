@@ -81,3 +81,22 @@ class ReportCreateRequest(BaseModel):
     description: str | None = None
     arkana_group: int | None = None
     cells: list[ReportCellRequest] = Field(default_factory=list)
+
+
+class NotesChapterRequest(BaseModel):
+    key: str = Field(min_length=1)
+    taggs: list[str] | str | None = None
+    content: str | None = None
+    files: list[str] | str | None = None
+
+
+class NotesChapterCreateRequest(BaseModel):
+    chapters: list[NotesChapterRequest] = Field(min_length=1)
+
+
+class NotesCreateRequest(BaseModel):
+    object_key: str | None = None
+    description: str | None = None
+    auth_group: int = Field(default=0, ge=0)
+    modeling_db: int = Field(default=0, ge=0)
+    chapters: list[NotesChapterRequest] = Field(default_factory=list)

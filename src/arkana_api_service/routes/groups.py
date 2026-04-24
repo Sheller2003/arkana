@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src.arkana_api_service.dependencies import get_current_user
+from src.arkana_api_service.route_auth import require_route_auth
 from src.arkana_api_service.routes.help_utils import build_help, with_help
 from src.arkana_auth.amezitUserObject import AmezitUserObject
 from src.arkana_auth.amezit_supabase_service import AmezitSupabaseService, SupabaseClientError
@@ -36,6 +37,7 @@ def create_group(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "create_group")
     supabase_user = _require_supabase_user(current_user)
     service = _get_supabase_service()
     try:
@@ -65,6 +67,7 @@ def get_group_members(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_group_members")
     supabase_user = _require_supabase_user(current_user)
     service = _get_supabase_service()
     try:
@@ -94,6 +97,7 @@ def delete_group(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "delete_group")
     supabase_user = _require_supabase_user(current_user)
     service = _get_supabase_service()
     try:
@@ -124,6 +128,7 @@ def assign_group(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "assign_group")
     supabase_user = _require_supabase_user(current_user)
     service = _get_supabase_service()
     try:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.arkana_auth.arkana_usage_accounting import ArkanaUsageAccounting
+from src.arkana_auth.user_group import UserGroup
 from src.arkana_mdd_db.main_db import ArkanaMainDB, AuthUser, DBWithConnection, PersonalUserRecord
 
 
@@ -40,6 +41,34 @@ class ArkanaUser:
             return True
         return self.main_db.user_can_access_group(self.auth, group_id)
 
+    def get_user_groups(self) -> list[UserGroup]:
+        return []
+
+    def get_group_members(self, group_id: int) -> list[str]:
+        raise PermissionError("Supabase login required")
+
+    def create_user_group(
+        self,
+        group_name: str,
+        *,
+        obj_group: bool | None = None,
+        parent_group: int | None = None,
+        object_key: str | None = None,
+    ) -> int:
+        raise PermissionError("Supabase login required")
+
+    def assign_user_to_group(self, *, user_id: str, group_id: int, group_role: str | None = None) -> None:
+        raise PermissionError("Supabase login required")
+
+    def remove_user_from_group(self, *, user_id: str, group_id: int) -> None:
+        raise PermissionError("Supabase login required")
+
+    def leave_user_group(self, *, group_id: int) -> None:
+        raise PermissionError("Supabase login required")
+
+    def invalidate_buffer(self) -> None:
+        return None
+
     def check_user_permissions(self, user_role: str) -> bool:
         if not self._has_supabase_user():
             return True
@@ -47,6 +76,12 @@ class ArkanaUser:
             return True
         role_order = {"viewer": 0, "editor": 1, "admin": 2, "root": 3}
         return role_order.get(self.user_role, -1) >= role_order.get(user_role, -1)
+
+    def has_effective_auth(self, auth_key: str, required_value: int = 1) -> bool:
+        return True
+
+    def has_auth_class_assignment(self, auth_class: str) -> bool:
+        return True
 
     def check_user_has_private_connection(self, db_id: int) -> bool:
         return self.get_users_private_connection(db_id) is not None

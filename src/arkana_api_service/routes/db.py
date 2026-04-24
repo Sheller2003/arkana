@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_api_service.dependencies import get_current_user, get_main_db
+from src.arkana_api_service.route_auth import require_route_auth
 from src.arkana_api_service.routes.help_utils import build_help, with_help
+from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_mdd_db.constants import EXCLUDED_SYSTEM_SCHEMAS, EXCLUDED_SYSTEM_TABLES
 from src.arkana_mdd_db.main_db import ArkanaMainDB
 from src.arkana_mdd_db.models import (
@@ -26,6 +27,7 @@ def get_db(
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_db")
     db_record = main_db.get_db_schema(db_id)
     if db_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Database not found")
@@ -52,6 +54,7 @@ def get_db_tables(
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_db_tables")
     if not current_user.can_access_db(db_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     tables = main_db.list_tables(db_id)
@@ -83,6 +86,7 @@ def get_database_table(
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_database_table")
     if not current_user.can_access_db(db_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     try:
@@ -120,6 +124,7 @@ def get_key_models(
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_key_models")
     if not current_user.can_access_db(db_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return with_help(
@@ -149,6 +154,7 @@ def create_db(
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "create_db")
     if not current_user.check_user_group_allowed(request.user_group):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Group access denied")
     if not current_user.is_admin() and request.owner != current_user.user_id:
@@ -174,6 +180,7 @@ def create_db_connection(
     main_db: ArkanaMainDB = Depends(get_main_db),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "create_db_connection")
     if not current_user.check_user_group_allowed(request.user_group):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Group access denied")
     if not current_user.is_admin() and request.owner != current_user.user_id:
@@ -198,6 +205,7 @@ def get_personal_user(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_personal_user")
     if not current_user.can_access_db(db_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     personal_user = current_user.get_private_db_user(db_id)
@@ -238,6 +246,7 @@ def create_personal_user(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "create_personal_user")
     try:
         personal_user = current_user.create_private_db_user(
             db_id=request.db_id,
@@ -267,6 +276,7 @@ def set_db_user_password(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "set_db_user_password")
     try:
         current_user.set_private_db_password(request.db_id, user_name, request.password)
     except PermissionError as exc:

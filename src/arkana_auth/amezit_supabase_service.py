@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.arkana_auth.supabase_client import SupabaseClient, SupabaseClientError
+from src.arkana_auth.user_group import UserGroup
 from src.arkana_mdd_db.config import AmezitSupabaseConfig, get_amezit_supabase_config
 
 
@@ -32,11 +33,15 @@ class AmezitSupabaseService:
         *,
         group_name: str,
         is_object: bool | None = None,
+        parent_group: int | None = None,
+        object_key: str | None = None,
         access_token: str | None,
     ) -> int:
         return self.client.create_group(
             group_name=group_name,
             is_object=is_object,
+            parent_group=parent_group,
+            object_key=object_key,
             access_token=access_token,
         )
 
@@ -50,15 +55,75 @@ class AmezitSupabaseService:
         group_id: int,
         access_token: str | None,
     ) -> bool:
-        result = self.client.call_rpc(
-            "check_user_is_in_group",
-            {"p_group_id": int(group_id), "p_user_id": str(supabase_user_id)},
+        return self.client.check_user_is_in_group(
+            group_id=group_id,
+            user_id=supabase_user_id,
             access_token=access_token,
         )
-        return bool(result)
 
     def get_group_members(self, *, group_id: int, access_token: str | None) -> list[str]:
         return self.client.get_group_members(group_id=group_id, access_token=access_token)
+
+    def get_my_groups(self, *, access_token: str) -> list[UserGroup]:
+        return self.client.get_my_user_groups(access_token=access_token)
+
+    def get_groups(self, *, group_id: int, access_token: str | None) -> list[UserGroup]:
+        return self.client.get_groups(group_id=group_id, access_token=access_token)
+
+    def get_all_user_groups(self, *, access_token: str | None = None) -> list[UserGroup]:
+        return self.client.get_all_user_groups(access_token=access_token)
+
+    def get_group_info(self, *, group_id: int, access_token: str | None = None) -> dict[str, object] | None:
+        return self.client.get_group_info(group_id=group_id, access_token=access_token)
+
+    def remove_from_group(self, *, group_id: int, user_id: str, access_token: str | None) -> None:
+        self.client.remove_from_group(group_id=group_id, user_id=user_id, access_token=access_token)
+
+    def leave_group(self, *, group_id: int, user_id: str, access_token: str | None) -> None:
+        self.client.leave_group(group_id=group_id, user_id=user_id, access_token=access_token)
+
+    def get_user_auth(self, *, user_id: str, access_token: str | None = None) -> object:
+        return self.client.get_user_auth(user_id=user_id, access_token=access_token)
+
+    def has_effective_auth(
+        self,
+        *,
+        user_id: str,
+        auth_key: str,
+        required_value: int,
+        access_token: str | None = None,
+    ) -> bool:
+        return bool(
+            self.client.has_effective_auth(
+                user_id=user_id,
+                auth_key=auth_key,
+                required_value=required_value,
+                access_token=access_token,
+            )
+        )
+
+    def has_auth_class_assignment(
+        self,
+        *,
+        user_id: str,
+        auth_class: str,
+        access_token: str | None = None,
+    ) -> bool:
+        return bool(
+            self.client.has_auth_class_assignment(
+                user_id=user_id,
+                auth_class=auth_class,
+                access_token=access_token,
+            )
+        )
+
+    def current_user_role(self, *, access_token: str | None = None) -> str | None:
+        result = self.client.current_user_role(access_token=access_token)
+        return None if result is None else str(result)
+
+    def current_user_payment_plan(self, *, access_token: str | None = None) -> int | None:
+        result = self.client.current_user_payment_plan(access_token=access_token)
+        return None if result is None else int(result)
 
     def get_chat(
         self,

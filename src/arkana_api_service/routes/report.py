@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
 from src.arkana_api_service.dependencies import get_current_user
+from src.arkana_api_service.route_auth import require_route_auth
 from src.arkana_api_service.routes.help_utils import build_help, with_help
 from src.arkana_auth.amezitUserObject import AmezitUserObject
 from src.arkana_auth.amezit_supabase_service import AmezitSupabaseService, SupabaseClientError
@@ -212,6 +213,7 @@ def get_report(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_report")
     manager = ArkanaObjectManager(current_user)
     try:
         report = manager.get_object(arkana_id).load()
@@ -247,6 +249,7 @@ def create_report(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "create_report")
     is_public = bool(request.public)
     auth_group = 0 if is_public else None
     arkana_group = 0 if is_public else None
@@ -397,6 +400,7 @@ def get_report_cell(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_report_cell")
     report = _load_report(current_user, arkana_id)
     if cell_identifier == "get" and cell_id is not None:
         cell = report.get_cell_by_id(cell_id)
@@ -451,6 +455,7 @@ def get_report_cell_by_id(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_report_cell_by_id")
     report = _load_report(current_user, arkana_id)
     cell = report.get_cell_by_id(cell_id)
     if cell is None:
@@ -479,6 +484,7 @@ def get_report_cell_content_by_id(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ):
+    require_route_auth(current_user, "get_report_cell_content_by_id")
     report = _load_report(current_user, arkana_id)
     cell = report.get_cell_by_id(cell_id)
     if cell is None:
@@ -510,6 +516,7 @@ def get_report_cell_content(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ):
+    require_route_auth(current_user, "get_report_cell_content")
     report = _load_report(current_user, arkana_id)
     cell = report.get_cell(cell_identifier)
     if cell is None:
@@ -540,6 +547,7 @@ def get_report_files(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_report_files")
     _ensure_object_group_access(current_user, arkana_id)
     session_manager = ArkanaSessionManager()
     files = session_manager.get_session_files(
@@ -576,6 +584,7 @@ def get_report_file(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ):
+    require_route_auth(current_user, "get_report_file")
     _ensure_object_group_access(current_user, arkana_id)
     session_manager = ArkanaSessionManager()
     file_info = session_manager.get_session_file(
@@ -615,6 +624,7 @@ def get_report_sessions(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_report_sessions")
     sessions = _get_report_sessions_for_user(arkana_id, current_user)
     return with_help(
         {"arkana_object_id": arkana_id, "sessions": sessions},
@@ -636,6 +646,7 @@ def restart_report_sessions(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "restart_report_sessions")
     _ensure_object_group_access(current_user, arkana_id)
     session_manager = ArkanaSessionManager()
     previous_sessions = _get_report_sessions_for_user(arkana_id, current_user)
@@ -667,6 +678,7 @@ def update_report_cell(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "update_report_cell")
     report = _load_report(current_user, arkana_id)
     payload = request.model_dump(exclude_none=True)
     report.update_cell(cell_identifier, payload)
@@ -700,6 +712,7 @@ def delete_report_cell(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "delete_report_cell")
     report = _load_report(current_user, arkana_id)
     cell = report.get_cell(cell_identifier)
     if cell is None:
@@ -740,6 +753,7 @@ def upload_report_cell_file(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "upload_report_cell_file")
     report = _load_report(current_user, arkana_id)
     cell = report.get_cell(cell_identifier)
     if cell is None:
@@ -816,6 +830,7 @@ def upload_report_file(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "upload_report_file")
     report = _load_report(current_user, arkana_id)
     original_name, file_suffix, payload = _read_uploaded_file(file, allowed_suffixes=ALLOWED_REPORT_UPLOAD_SUFFIXES)
     if file_suffix in {"py", "r"}:
@@ -904,6 +919,7 @@ def delete_report(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "delete_report")
     report = _load_report(current_user, arkana_id)
     if not current_user.check_user_permissions("admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
@@ -939,6 +955,7 @@ def create_report_cell(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "create_report_cell")
     report = _load_report(current_user, arkana_id)
     payload = request.model_dump(exclude_none=True)
 
@@ -981,6 +998,7 @@ def run_report_cells(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "run_report_cells")
     report = _load_report(current_user, arkana_id)
     try:
         results = report.run_all_cells(save_result=save)
@@ -1070,6 +1088,7 @@ def get_run_report_cell(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "get_run_report_cell")
     return _run_report_cell(arkana_id, cell_identifier, False, current_user, help)
 
 
@@ -1082,4 +1101,5 @@ def post_run_report_cell(
     current_user: ArkanaUser = Depends(get_current_user),
     help: bool = Query(default=False),
 ) -> dict[str, object]:
+    require_route_auth(current_user, "post_run_report_cell")
     return _run_report_cell(arkana_id, cell_identifier, save, current_user, help)

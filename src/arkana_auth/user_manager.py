@@ -5,13 +5,15 @@ import threading
 import time
 from dataclasses import dataclass
 
+from src.arkana_auth.amezit_supabase_service import AmezitSupabaseService
 from src.arkana_auth.amezitUserObject import AmezitUserObject, AmezitUserPolicyError
+from src.arkana_auth.user_group import UserGroup
 from src.arkana_auth.user_object import ArkanaUser
 from src.arkana_mdd_db.config import get_amezit_supabase_config
 from src.arkana_mdd_db.main_db import ArkanaMainDB, AuthUser
 
 
-AUTH_CACHE_TTL_SECONDS = 30 * 60
+AUTH_CACHE_TTL_SECONDS = 45 * 60
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,61 @@ class UserManager:
                 supabase_access_token=entry.supabase_access_token,
             )
         return ArkanaUser(main_db=self.main_db, auth=entry.auth)
+
+    @staticmethod
+    def _build_supabase_service() -> AmezitSupabaseService:
+        return AmezitSupabaseService.from_env()
+
+    def get_user_groups(self, user: ArkanaUser) -> list[UserGroup]:
+        if isinstance(user, AmezitUserObject):
+            return user.get_user_groups()
+        return []
+
+    def create_group(
+        self,
+        user: ArkanaUser,
+        *,
+        group_name: str,
+        obj_group: bool | None = None,
+        parent_group: int | None = None,
+        object_key: str | None = None,
+    ) -> int:
+        return user.create_user_group(
+            group_name,
+            obj_group=obj_group,
+            parent_group=parent_group,
+            object_key=object_key,
+        )
+
+    def assign_user_to_group(
+        self,
+        user: ArkanaUser,
+        *,
+        target_user_id: str,
+        group_id: int,
+        group_role: str | None = None,
+    ) -> None:
+        user.assign_user_to_group(user_id=target_user_id, group_id=group_id, group_role=group_role)
+
+    def remove_user_from_group(self, user: ArkanaUser, *, target_user_id: str, group_id: int) -> None:
+        user.remove_user_from_group(user_id=target_user_id, group_id=group_id)
+
+    def get_group_members(self, user: ArkanaUser, *, group_id: int) -> list[str]:
+        return user.get_group_members(group_id)
+
+    def reload_user_buffer(self, user_id: str) -> int:
+        normalized_user_id = str(user_id)
+        removed = 0
+        with self._cache_lock:
+            cache_keys = [
+                cache_key
+                for cache_key, entry in self._auth_cache.items()
+                if entry.auth.user_id == normalized_user_id or str(entry.supabase_user_id or "") == normalized_user_id
+            ]
+            for cache_key in cache_keys:
+                self._auth_cache.pop(cache_key, None)
+            removed = len(cache_keys)
+        return removed
 
 
 __all__ = ["UserManager", "AmezitUserPolicyError"]

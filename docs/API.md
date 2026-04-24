@@ -1,7 +1,8 @@
 # Arkana API
 
-Base URL:
+Base URLs:
 - `http://<host>:8000`
+- optional server-side via Traefik: `https://arkanan8n.cloud`
 
 ## Auth
 
@@ -22,8 +23,10 @@ Authorization: Basic base64(username:password)
 ```
 
 Hinweise:
-- Supabase-Token funktionieren auf allen Endpoints.
-- Die meisten Endpoints akzeptieren `?help=true`.
+- Bearer-Tokens aus Supabase funktionieren auf allen Endpoints.
+- Basic Auth bleibt als Fallback aktiv.
+- Viele Endpoints akzeptieren `?help=true` und hängen dann Metadaten an die JSON-Response an.
+- CORS ist serverseitig in FastAPI aktiv. Standardmäßig sind alle Origins erlaubt, einschränkbar über `ARKANA_CORS_ALLOW_ORIGINS`.
 
 ## Standard-Objekte
 
@@ -61,7 +64,7 @@ Felder:
 - `cell_type: string`
 - `taggs: string[] | string | null`
 - `content: string | object | null`
-- `cells: ReportCell[]` optional in verschachtelter Ausgabe
+- `cells: ReportCell[]`
 
 Wichtige `cell_type` Werte:
 - `text`
@@ -92,21 +95,23 @@ Beispiel:
 ### ReportCreateRequest
 
 Felder:
-- `public: bool`
-- `auth_group: int`
+- `public: bool = true`
+- `auth_group: int = 0`
 - `object_key: string | null`
 - `description: string | null`
 - `arkana_group: int | null`
 - `cells: ReportCellRequest[]`
 
+Regeln:
+- `public=true` setzt `auth_group=0` und `arkana_group=0`.
+- `public=false` ist nur mit Supabase-Login erlaubt und erzeugt automatisch eine neue Supabase-Objektgruppe mit `group_name=<arkana_id>`.
+
 Beispiel:
 ```json
 {
   "public": true,
-  "auth_group": 0,
   "object_key": "sales-q2",
   "description": "Quarterly report",
-  "arkana_group": 0,
   "cells": []
 }
 ```
@@ -128,6 +133,23 @@ Beispiel:
   "content": "summary(cars)"
 }
 ```
+
+### Upload-Regeln
+
+`POST /report/{arkana_id}/upload`
+- max. `10 MB`
+- Feldname: `file`
+- `.csv` und `.json`: speichern Datei im Workspace und erzeugen neue File-Zelle
+- `.RData` / `.rdata`: speichern Datei im Workspace und erzeugen neue `rdata`-Zelle
+- `.py`: erzeugt immer eine neue `py_code`-Zelle, Datei wird nicht gespeichert
+- `.r`: erzeugt immer eine neue `r_code`-Zelle, Datei wird nicht gespeichert
+
+`POST /report/{arkana_id}/cell/{cell_identifier}/upload`
+- max. `10 MB`
+- Feldname: `file`
+- nur für bestehende File-Zellen
+- erlaubt nur `.csv` und `.json`
+- ersetzt die Dateireferenz der Zielzelle
 
 ## Health
 
@@ -168,25 +190,61 @@ Beispiel:
 
 ### `GET /user/usage`
 
+Beschreibung:
+- Liefert die heutige Usage des aktuellen Users.
+
 Response-Felder:
 - `user_id: string`
 - `service: string`
-- weitere Usage-Felder aus dem Accounting
+- weitere Usage-Zähler, abhängig vom Accounting-Backend
+
+Beispiel:
+```json
+{
+  "user_id": "d30ab318-15da-4bf7-8331-aa4e24098f1b",
+  "service": "arkana",
+  "runtime_seconds": 124,
+  "tokens": 8912
+}
+```
 
 ### `GET /user/max_usage`
 
-Response-Felder:
-- `user_id: string`
-- `service: string`
-- `runtime_seconds_max: int`
-- `tokens_max: int`
+Beschreibung:
+- Liefert das tägliche Limit.
+- Root-User erhalten `-1`.
 
-### `GET /user/usage/{user_id}`
+Beispiel:
+```json
+{
+  "user_id": "d30ab318-15da-4bf7-8331-aa4e24098f1b",
+  "service": "arkana",
+  "runtime_seconds_max": 3600,
+  "tokens_max": 100000
+}
+```
+
+### `GET /user/{user_id}/usage`
 
 Beschreibung:
-- Root-only.
+- Admin/root only.
+- Liefert heutige Usage eines beliebigen Users.
+
+### `POST /user/{user_id}/reload`
+
+Beschreibung:
+- Admin/root only.
+- Invalidiert den kompletten User-Buffer fuer den angegebenen User.
+
+### `POST /user/reload`
+
+Beschreibung:
+- Invalidiert den kompletten Buffer des aktuell authentifizierten Users.
 
 ## Groups
+
+Wichtig:
+- Diese Endpunkte verlangen einen echten Supabase-Login.
 
 ### `POST /groups/create_group`
 
@@ -227,6 +285,55 @@ Response:
 }
 ```
 
+## Notes
+
+### `POST /notes`
+
+Beschreibung:
+- Erzeugt ein neues gepuffertes `ark_notes` Objekt.
+- Das Objekt wird noch nicht in der DB gespeichert.
+- Buffer-Lebensdauer: 24 Stunden.
+
+### `GET /notes/{object_id}/`
+
+Beschreibung:
+- Liefert ein persistiertes `ark_notes` Objekt mit allen Chapters.
+
+### `GET /notes/tmp_{buffer_id}/`
+
+Beschreibung:
+- Liefert ein gepuffertes Notes-Objekt.
+- Buffer-Lebensdauer: 24 Stunden.
+
+### `POST /notes/{note_id}/save`
+
+Beschreibung:
+- Persistiert ein gepuffertes `tmp_<buffer_id>` Notes-Objekt in die DB.
+- Danach besitzt das Objekt eine echte `arkana_id`.
+
+### `POST /notes/{node_id}/chapter`
+
+Beschreibung:
+- Erstellt ein oder mehrere Chapters.
+- `node_id=0` erzeugt bzw. speichert ein neues Notes-Objekt nur im Buffer.
+- `node_id=tmp_<buffer_id>` aktualisiert ein gepuffertes Notes-Objekt.
+- `node_id=<arkana_id>` aktualisiert ein persistiertes Notes-Objekt.
+
+### `GET /notes/{node_id}/chapter/{chapter_identifier}`
+
+Beschreibung:
+- Liefert ein Chapter per numerischer `chapter_id` oder `chapter_key`.
+
+### `GET /notes/{node_id}/chapter/{chapter_identifier}/files`
+
+Beschreibung:
+- Liefert die Dateiliste des Chapters.
+
+### `POST /notes/{node_id}/chapter/{chapter_identifier}/file`
+
+Beschreibung:
+- Laedt eine Datei bis max. `10 MB` hoch und haengt sie an das Chapter an.
+
 ### `POST /groups/{group_id}/assign`
 
 Request:
@@ -250,7 +357,7 @@ Response:
 ### `GET /report/{arkana_id}`
 
 Beschreibung:
-- Lädt den kompletten Report mit Top-Level-Zellen und Sub-Zellen.
+- Lädt den kompletten Report mit Zellen und Sub-Zellen.
 
 Beispiel:
 ```json
@@ -260,13 +367,14 @@ Beispiel:
   "auth_group": 0,
   "object_key": "demo-report",
   "description": "Example report",
+  "modeling_db": 0,
   "arkana_group": 0,
   "cells": [
     {
       "cell_id": 1,
       "cell_key": "py_code",
       "cell_type": "py_code",
-      "taggs": ["demo"],
+      "taggs": [],
       "content": "print('hello')",
       "cells": []
     }
@@ -278,20 +386,17 @@ Beispiel:
 
 Beschreibung:
 - Erstellt einen Report.
-- `public=true` erzeugt einen öffentlichen Report mit Gruppe `0`.
-- `public=false` erzeugt eine neue Supabase-Gruppe.
 
 Request:
 ```json
 {
   "public": false,
   "object_key": "private-report",
-  "description": "Private report",
+  "description": "Only for a group",
   "cells": [
     {
       "cell_key": "py_code",
       "cell_type": "py_code",
-      "taggs": ["demo"],
       "content": "print('hello')"
     }
   ]
@@ -301,18 +406,19 @@ Request:
 Response:
 ```json
 {
-  "arkana_id": 8,
+  "arkana_id": 12,
   "arkana_type": "report",
-  "auth_group": 123,
+  "auth_group": 321,
   "object_key": "private-report",
-  "description": "Private report",
-  "arkana_group": 123,
+  "description": "Only for a group",
+  "modeling_db": 0,
+  "arkana_group": 321,
   "cells": [
     {
       "cell_id": 1,
       "cell_key": "py_code",
       "cell_type": "py_code",
-      "taggs": ["demo"],
+      "taggs": null,
       "content": "print('hello')",
       "cells": []
     }
@@ -320,131 +426,155 @@ Response:
 }
 ```
 
-### `DELETE /report/{arkana_id}`
+### `POST /report/{arkana_id}/cell/`
 
 Beschreibung:
-- Löscht den Report, Sessions und Workspace.
+- Erstellt eine neue Top-Level-Zelle.
+- optional mit `?index=...` für eine sichtbare Position.
+
+Request:
+```json
+{
+  "cell_key": "notes",
+  "cell_type": "md",
+  "taggs": ["intro"],
+  "content": "# Hello"
+}
+```
+
+Response:
+```json
+{
+  "cell_id": 7,
+  "cell_key": "notes",
+  "cell_type": "md",
+  "taggs": ["intro"],
+  "content": "# Hello",
+  "cells": []
+}
+```
+
+### `PUT /report/{arkana_id}/cell/{cell_identifier}`
+
+Beschreibung:
+- Aktualisiert eine Zelle über sichtbaren Index oder `cell_key`.
+- `cell_type` kann manuell gesetzt werden.
+- Tags werden über `taggs` gesetzt oder überschrieben.
+
+Request:
+```json
+{
+  "cell_type": "file",
+  "taggs": ["data"],
+  "content": "customers.csv"
+}
+```
+
+Response:
+```json
+{
+  "cell_id": 10,
+  "cell_key": "customers",
+  "cell_type": "file_csv",
+  "taggs": ["data"],
+  "content": "http://72.61.87.45:8000/report/8/files/customers.csv",
+  "cells": []
+}
+```
+
+### `DELETE /report/{arkana_id}/cell/{cell_identifier}`
+
+Beschreibung:
+- Löscht die Zelle.
+- Bei File-Zellen wird die Datei nur gelöscht, wenn keine andere Zelle mehr darauf zeigt.
 
 Response:
 ```json
 {
   "status": "deleted",
-  "arkana_object_id": 8,
-  "deleted_sessions": [],
-  "deleted_workspaces": [
-    "/app/arkana_spheres/workspaces/report_8"
-  ]
+  "cell": {
+    "cell_id": 10,
+    "cell_key": "customers",
+    "cell_type": "file_csv",
+    "taggs": ["data"],
+    "content": "customers.csv"
+  }
 }
 ```
 
-### `POST /report/{arkana_id}/run`
-
-Query:
-- `save=true|false`
-
-Response-Felder:
-- `arkana_object_id: int`
-- `save_result: bool`
-- `results: object[]`
-
-Beispiel:
-```json
-{
-  "arkana_object_id": 8,
-  "save_result": true,
-  "results": [
-    {
-      "cell": 1,
-      "results": [
-        {
-          "cell_id": 9,
-          "cell_key": "py_code",
-          "cell_type": "py_result",
-          "content": "hello",
-          "cells": []
-        }
-      ]
-    }
-  ]
-}
-```
-
-### `GET /report/{arkana_id}/sessions`
-
-Response-Felder:
-- `arkana_object_id: int`
-- `sessions: SessionInfo[]`
-
-`SessionInfo`:
-- `session_id: string`
-- `container_name: string`
-- `runtime_type: string`
-- `language: string`
-- `user_id: string`
-- `arkana_object_id: string`
-- `workspace_path: string`
-- `created_at: string | null`
-- `expires_at: string | null`
-- `lifetime_seconds: int | null`
-
-Beispiel:
-```json
-{
-  "arkana_object_id": 8,
-  "sessions": [
-    {
-      "session_id": "python-8-1234567890",
-      "container_name": "arkana-python-python-8-1234567890",
-      "runtime_type": "py",
-      "language": "python",
-      "user_id": "user-1",
-      "arkana_object_id": "8",
-      "workspace_path": "/app/arkana_spheres/workspaces/report_8",
-      "created_at": "2026-04-15T08:00:00+00:00",
-      "expires_at": "2026-04-15T08:30:00+00:00",
-      "lifetime_seconds": 1800
-    }
-  ]
-}
-```
-
-### `POST /report/{arkana_id}/sessions`
+### `GET /report/{arkana_id}/cell/{cell_identifier}`
 
 Beschreibung:
-- Löscht und erzeugt die Sessions des aktuellen Users für den Report neu.
+- Liefert eine Zelle als JSON.
+- `cell_identifier` ist sichtbarer Top-Level-Index oder `cell_key`.
+- alternativ: `?cell_id=<internal id>`
 
-Response-Felder:
-- `arkana_object_id: int`
-- `previous_sessions: SessionInfo[]`
-- `restarted_sessions: SessionInfo[]`
-- `status: "restarted"`
+### `GET /report/{arkana_id}/cell`
 
-## Report Uploads
+Beschreibung:
+- Liefert eine Zelle per exakter `cell_id`.
+
+Beispiel:
+```http
+GET /report/8/cell?cell_id=10
+```
+
+### `GET /report/{arkana_id}/cell/get`
+
+Beschreibung:
+- Liefert Zellinhalt nach Typ:
+- File-Zellen: Redirect
+- `html`: HTML-Body
+- `md` und `text`: Plain Text
+- sonst JSON
+
+### `GET /report/{arkana_id}/cell/{cell_identifier}/get`
+
+Beschreibung:
+- Wie oben, aber per sichtbarem Index oder `cell_key`.
+
+## Files
+
+### `GET /report/{arkana_id}/files`
+
+Beschreibung:
+- Listet exportierte Report-Dateien.
+- aktuell werden nur `.csv`, `.txt` und `.png` ausgeliefert.
+
+Response:
+```json
+{
+  "arkana_object_id": 8,
+  "files": [
+    {
+      "file_name": "sinus.png",
+      "file_url": "http://72.61.87.45:8000/report/8/files/sinus.png"
+    }
+  ]
+}
+```
+
+### `GET /report/{arkana_id}/files/{file_name}`
+
+Beschreibung:
+- Streamt eine Report-Datei.
+- mit `?help=true` stattdessen JSON-Metadaten.
+
+## Upload
 
 ### `POST /report/{arkana_id}/upload`
 
-Content-Type:
+Request:
 - `multipart/form-data`
+- Feld: `file`
 
-Form-Felder:
-- `file`
-
-Max:
-- `10 MB`
-
-Verhalten nach Dateiendung:
-- `.csv` -> neue `file_csv`-Zelle, Datei wird gespeichert
-- `.json` -> neue `file_json`-Zelle, Datei wird gespeichert
-- `.rdata` / `.RData` -> neue `rdata`-Zelle, Datei wird gespeichert
-- `.py` -> neue `py_code`-Zelle, Datei wird nicht gespeichert
-- `.r` -> neue `r_code`-Zelle, Datei wird nicht gespeichert
-
-Response-Felder:
-- `status: "uploaded"`
-- `arkana_object_id: int`
-- `cell: ReportCell`
-- `file_name: string`
-- `file_size: int`
+Beispiel `curl`:
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@customers.csv" \
+  http://72.61.87.45:8000/report/8/upload
+```
 
 Beispiel Response für `.csv`:
 ```json
@@ -452,14 +582,14 @@ Beispiel Response für `.csv`:
   "status": "uploaded",
   "arkana_object_id": 8,
   "cell": {
-    "cell_id": 10,
-    "cell_key": "cell_10",
+    "cell_id": 11,
+    "cell_key": "customers",
     "cell_type": "file_csv",
     "taggs": null,
-    "content": "http://127.0.0.1:8000/report/8/files/data.csv",
+    "content": "http://72.61.87.45:8000/report/8/files/customers.csv",
     "cells": []
   },
-  "file_name": "data.csv",
+  "file_name": "customers.csv",
   "file_size": 2048
 }
 ```
@@ -470,230 +600,142 @@ Beispiel Response für `.py`:
   "status": "uploaded",
   "arkana_object_id": 8,
   "cell": {
-    "cell_id": 11,
-    "cell_key": "cell_11",
+    "cell_id": 12,
+    "cell_key": "py_code",
     "cell_type": "py_code",
     "taggs": null,
     "content": "print('hello')",
     "cells": []
   },
   "file_name": "script.py",
-  "file_size": 25
+  "file_size": 84
 }
 ```
 
-## Report Cells
-
-### `GET /report/{arkana_id}/cell/{cell_identifier}`
+### `POST /report/{arkana_id}/cell/{cell_identifier}/upload`
 
 Beschreibung:
-- Liefert eine Zelle als JSON.
-
-### `GET /report/{arkana_id}/cell?cell_id=<id>`
-
-Beschreibung:
-- Liefert eine Zelle über die exakte interne `cell_id`.
-
-### `GET /report/{arkana_id}/cell/get?cell_id=<id>`
-
-Beschreibung:
-- Liefert den Zellinhalt direkt.
-- File-Zellen erzeugen Redirects.
-- `html` liefert HTML.
-- `md` / `text` liefern Plaintext.
-
-### `GET /report/{arkana_id}/cell/{cell_identifier}/get`
-
-Beschreibung:
-- Wie oben, aber Lookup über `cell_key` oder sichtbaren Index.
-
-### `POST /report/{arkana_id}/cell/`
-
-Query:
-- `index` optional
+- Weist eine hochgeladene `.csv`- oder `.json`-Datei einer bestehenden File-Zelle zu.
 
 Request:
+- `multipart/form-data`
+- Feld: `file`
+
+Beispiel `curl`:
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@customers.json" \
+  http://72.61.87.45:8000/report/8/cell/customers/upload
+```
+
+## Sessions
+
+### `GET /report/{arkana_id}/sessions`
+
+Beschreibung:
+- Listet alle Runtime-Sessions des aktuellen Users in diesem Report.
+
+Response:
 ```json
 {
-  "cell_key": "note_1",
-  "cell_type": "text",
-  "taggs": ["intro"],
-  "content": "Hello"
+  "arkana_object_id": 8,
+  "sessions": [
+    {
+      "session_id": "8-py-d30ab318",
+      "container_name": "arkana-py-report-8",
+      "runtime_type": "py",
+      "language": "python",
+      "user_id": "d30ab318-15da-4bf7-8331-aa4e24098f1b",
+      "arkana_object_id": "8",
+      "workspace_path": "/app/arkana_spheres/workspaces/report_8",
+      "created_at": "2026-04-23T10:12:00",
+      "expires_at": "2026-04-23T12:12:00",
+      "lifetime_seconds": 7200
+    }
+  ]
 }
+```
+
+### `POST /report/{arkana_id}/sessions`
+
+Beschreibung:
+- Löscht und erstellt die Runtime-Session-Container des aktuellen Users für diesen Report neu.
+- der Workspace bleibt report-basiert.
+
+Response:
+```json
+{
+  "arkana_object_id": 8,
+  "previous_sessions": [],
+  "restarted_sessions": [],
+  "status": "restarted"
+}
+```
+
+## Report-Ausführung
+
+### `POST /report/{arkana_id}/run`
+
+Beschreibung:
+- Führt alle ausführbaren Code-Zellen aus.
+- `?save=true|false`
+
+Beispiel:
+```http
+POST /report/8/run?save=true
 ```
 
 Response:
 ```json
 {
-  "cell_id": 12,
-  "cell_key": "note_1",
-  "cell_type": "text",
-  "taggs": ["intro"],
-  "content": "Hello",
-  "cells": []
-}
-```
-
-### `PUT /report/{arkana_id}/cell/{cell_identifier}`
-
-Beschreibung:
-- Aktualisiert eine Zelle.
-- Wenn `cell_type="file"` gesetzt wird und `content` auf `.csv`, `.json` oder `.jpg` zeigt, wird automatisch auf den spezifischen File-Typ umgestellt.
-
-Request:
-```json
-{
-  "cell_type": "file",
-  "content": "result.json",
-  "taggs": ["export"]
-}
-```
-
-Beispiel Response:
-```json
-{
-  "cell_id": 12,
-  "cell_key": "note_1",
-  "cell_type": "file_json",
-  "taggs": ["export"],
-  "content": "http://127.0.0.1:8000/report/8/files/result.json",
-  "cells": []
-}
-```
-
-### `DELETE /report/{arkana_id}/cell/{cell_identifier}`
-
-Beschreibung:
-- Löscht eine Zelle.
-- Wenn es eine dateibasierte Zelle ist, wird die Datei nur gelöscht, wenn keine andere Zelle im Report mehr auf dieselbe Datei zeigt.
-
-Response:
-```json
-{
-  "status": "deleted",
-  "cell": {
-    "cell_id": 10,
-    "cell_key": "cell_10",
-    "cell_type": "file_csv",
-    "content": "http://127.0.0.1:8000/report/8/files/data.csv",
-    "cells": []
-  }
+  "arkana_object_id": 8,
+  "save_result": true,
+  "results": [
+    {
+      "cell": "py_code",
+      "results": [
+        {
+          "cell_id": 13,
+          "cell_type": "py_result",
+          "content": "hello\n"
+        }
+      ]
+    }
+  ]
 }
 ```
 
 ### `GET /report/{arkana_id}/cell/{cell_identifier}/run`
 
 Beschreibung:
-- Führt eine Zelle aus, ohne Resultate zu persistieren.
+- Führt genau eine Zelle aus.
+- `GET` speichert Ergebnisse nicht.
 
 ### `POST /report/{arkana_id}/cell/{cell_identifier}/run`
 
-Query:
-- `save=true|false`
+Beschreibung:
+- Führt genau eine Zelle aus.
+- `POST` akzeptiert `?save=true|false`.
 
-Beispiel Response:
-```json
-{
-  "arkana_object_id": 8,
-  "cell": "py_code",
-  "save_result": true,
-  "results": [
-    {
-      "cell_id": 13,
-      "cell_key": "py_code",
-      "cell_type": "py_result",
-      "content": "hello",
-      "cells": []
-    }
-  ]
-}
-```
+Hinweis zu R:
+- Wenn `rdata`-Zellen im Report existieren, werden die referenzierten `.RData`-Dateien vor jedem `r_code`-Run automatisch geladen.
 
-### `POST /report/{arkana_id}/cell/{cell_identifier}/upload`
+## Report-Löschen
 
-Content-Type:
-- `multipart/form-data`
-
-Voraussetzungen:
-- Zielzelle muss bereits eine File-Zelle sein
-
-Erlaubte Dateien:
-- `.csv`
-- `.json`
-
-Response-Felder:
-- `status`
-- `arkana_object_id`
-- `cell`
-- `file_name`
-- `file_size`
-
-Beispiel Response:
-```json
-{
-  "status": "uploaded",
-  "arkana_object_id": 8,
-  "cell": {
-    "cell_id": 10,
-    "cell_key": "cell_10",
-    "cell_type": "file_csv",
-    "content": "http://127.0.0.1:8000/report/8/files/upload.csv",
-    "cells": []
-  },
-  "file_name": "upload.csv",
-  "file_size": 1024
-}
-```
-
-## Report Files
-
-### `GET /report/{arkana_id}/files`
-
-Response-Felder:
-- `arkana_object_id: int`
-- `files: FileEntry[]`
-
-`FileEntry`:
-- `file_name: string`
-- `file_url: string`
-
-Beispiel:
-```json
-{
-  "arkana_object_id": 8,
-  "files": [
-    {
-      "file_name": "data.csv",
-      "file_url": "http://127.0.0.1:8000/report/8/files/data.csv"
-    }
-  ]
-}
-```
-
-### `GET /report/{arkana_id}/files/{file_name}`
+### `DELETE /report/{arkana_id}`
 
 Beschreibung:
-- Streamt die Datei direkt.
+- Admin-only.
+- Löscht Report, Zellen, Container und Workspaces.
 
-## Frames
-
-### `POST /frames/execute`
-
-Request-Felder:
-- `frame: object`
-- `input_parameters: object`
-- `referenced_frames: object`
-
-Beispiel:
+Response:
 ```json
 {
-  "frame": {
-    "frame_id": 1
-  },
-  "input_parameters": {
-    "limit": 10
-  },
-  "referenced_frames": {}
+  "status": "deleted",
+  "arkana_object_id": 8,
+  "deleted_sessions": 2,
+  "deleted_workspaces": 1
 }
 ```
 
@@ -702,9 +744,12 @@ Beispiel:
 ### `GET /db/{db_id}/`
 
 Beschreibung:
-- Liefert DB-Schema-Metadaten.
+- Liefert Schema-Metadaten für eine zugreifbare Datenbank.
 
 ### `GET /db/{db_id}/tables`
+
+Beschreibung:
+- Listet sichtbare Tabellen ohne interne Systemtabellen.
 
 Response:
 ```json
@@ -713,7 +758,35 @@ Response:
   "tables": [
     {
       "table_name": "customers",
-      "table_schema": "app"
+      "table_schema": "analytics"
+    }
+  ]
+}
+```
+
+### `GET /database/{db_id}/table/{table_key}`
+
+Beschreibung:
+- Liefert eine JSON-Beschreibung einer konkreten Tabelle und ihrer Spalten.
+
+Response:
+```json
+{
+  "database_id": 1,
+  "table_key": "customers",
+  "table_name": "customers",
+  "columns": [
+    {
+      "column_name": "id",
+      "data_type": "bigint",
+      "is_nullable": "NO",
+      "column_key": "PRI"
+    },
+    {
+      "column_name": "name",
+      "data_type": "varchar",
+      "is_nullable": "YES",
+      "column_key": ""
     }
   ]
 }
@@ -724,7 +797,7 @@ Response:
 Request:
 ```json
 {
-  "start_tables": ["customers"],
+  "start_tables": ["customers", "orders"],
   "max_distance": 2,
   "include_all": false
 }
@@ -733,50 +806,30 @@ Request:
 ### `POST /db/`
 
 Request-Felder:
-- `user_group: int`
-- `owner: string`
-- `url: string | null`
-- `ip: string | null`
-- `db_name: string`
-- `db_description: string | null`
-- `db_con_id: int`
-
-Beispiel:
-```json
-{
-  "user_group": 0,
-  "owner": "user-1",
-  "db_name": "analytics",
-  "db_description": "Analytics DB",
-  "db_con_id": 2
-}
-```
+- `user_group`
+- `owner`
+- `url`
+- `ip`
+- `db_name`
+- `db_description`
+- `db_con_id`
 
 ### `POST /db_connection/`
 
 Request-Felder:
-- `user_group: int`
-- `owner: string`
-- `url: string | null`
-- `ip: string | null`
-- `server_description: string | null`
-- `default_user: string | null`
-- `admin_user: string | null`
-- `db_type: string`
+- `user_group`
+- `owner`
+- `url`
+- `ip`
+- `server_description`
+- `default_user`
+- `admin_user`
+- `db_type`
 
 ### `GET /db_connection/personal_user/?db_id=<id>`
 
-Response:
-```json
-{
-  "db_id": 1,
-  "personal_user": {
-    "db_id": 1,
-    "arkana_user_id": "user-1",
-    "db_user_name": "analytics_user"
-  }
-}
-```
+Beschreibung:
+- Liefert den persönlichen DB-User des aktuellen Users.
 
 ### `POST /db_connection/personal_user/`
 
@@ -784,8 +837,8 @@ Request:
 ```json
 {
   "db_id": 1,
-  "arkana_user_id": "user-1",
-  "db_user_name": "analytics_user"
+  "arkana_user_id": "d30ab318-15da-4bf7-8331-aa4e24098f1b",
+  "db_user_name": "niklas_private"
 }
 ```
 
@@ -804,5 +857,34 @@ Response:
 {
   "status": "ok",
   "keyring_service": "arkana/db_credentials"
+}
+```
+
+## Frames
+
+### `POST /frames/execute`
+
+Beschreibung:
+- Führt ein Frame-Definition-Objekt aus.
+
+Request:
+```json
+{
+  "frame": {
+    "frame_id": 1,
+    "nodes": []
+  },
+  "input_parameters": {
+    "country": "DE"
+  },
+  "referenced_frames": {}
+}
+```
+
+Response:
+```json
+{
+  "frame_id": 1,
+  "result": {}
 }
 ```
