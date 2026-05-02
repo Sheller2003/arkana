@@ -1,6 +1,7 @@
 from src.mdd_arkana_object.ark_obj_interface import Arkana_Object_Interface
 from src.mdd_arkana_object.ark_notes import ArkanaNotes
 from src.mdd_arkana_object.ark_report import ArkanaReport
+from src.mdd_arkana_object.arkana_type_registry import ARKANA_TYPE_SPECS
 from src.mdd_arkana_object.db_connection import ArkanaObjectDBConnection
 
 from src.arkana_mdd_db.config import get_main_db_config
@@ -50,6 +51,8 @@ class ArkanaObjectManager():
         config = get_main_db_config()
         db = ArkanaMainDB(config)
 
+        fallback = {spec.type_key: spec.type_description for spec in ARKANA_TYPE_SPECS}
+
         try:
             with db.connect() as connection:
                 cursor = connection.cursor()
@@ -62,7 +65,7 @@ class ArkanaObjectManager():
                     cursor.close()
         except Exception:
             # Graceful fallback if table doesn't exist yet
-            return {}
+            return fallback
 
         result: dict[str, str] = {}
         for row in rows:
@@ -71,7 +74,46 @@ class ArkanaObjectManager():
                 continue
             desc = str(row[1]) if len(row) > 1 and row[1] is not None else ""
             result[key] = desc
-        return result
+        return result or fallback
+
+    def get_class_specs(self) -> dict[str, dict[str, str]]:
+        """
+        Return all Arkana types as a mapping
+        {type_key: {"type_group": ..., "type_description": ...}}.
+        """
+        config = get_main_db_config()
+        db = ArkanaMainDB(config)
+        fallback = {
+            spec.type_key: {
+                "type_group": spec.type_group,
+                "type_description": spec.type_description,
+            }
+            for spec in ARKANA_TYPE_SPECS
+        }
+
+        try:
+            with db.connect() as connection:
+                cursor = connection.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT type_key, type_group, type_description FROM arkana_type ORDER BY type_key"
+                    )
+                    rows = cursor.fetchall() or []
+                finally:
+                    cursor.close()
+        except Exception:
+            return fallback
+
+        result: dict[str, dict[str, str]] = {}
+        for row in rows:
+            key = str(row[0]) if row and row[0] is not None else None
+            if not key:
+                continue
+            result[key] = {
+                "type_group": str(row[1]) if len(row) > 1 and row[1] is not None else "",
+                "type_description": str(row[2]) if len(row) > 2 and row[2] is not None else "",
+            }
+        return result or fallback
 
     def __select_object(self, arkana_id:int)->dict:
         # Connect to main Arkana DB using .env configuration and fetch object row

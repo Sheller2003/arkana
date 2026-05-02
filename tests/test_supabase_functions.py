@@ -20,8 +20,8 @@ from src.arkana_auth.supabase_client import SupabaseClient
 from src.arkana_auth.supabase_connector import DOCUMENTED_RPC_METHOD_NAMES
 from src.arkana_auth.user_manager import AUTH_CACHE_TTL_SECONDS, UserManager
 from src.arkana_auth.user_object import ArkanaUser
-from src.arkana_mdd_db.main_db import AuthUser
-from src.arkana_mdd_db.config import AmezitSupabaseConfig
+from src.arkana_mdd_db.main_db import ArkanaMainDB, AuthUser
+from src.arkana_mdd_db.config import AmezitSupabaseConfig, ArkanaMainDBConfig
 
 ROUTE_AUTH_PATH = PROJECT_ROOT / "src" / "arkana_api_service" / "route_auth.py"
 ROUTE_AUTH_SPEC = importlib.util.spec_from_file_location("arkana_test_route_auth", ROUTE_AUTH_PATH)
@@ -414,7 +414,107 @@ class SupabaseUsageAccountingTests(unittest.TestCase):
         supabase_service.log_tokens.assert_not_called()
 
 
+class MainDBAuthTests(unittest.TestCase):
+    def test_authenticate_api_user_accepts_supabase_email_login_identifier(self) -> None:
+        main_db = ArkanaMainDB(
+            ArkanaMainDBConfig(
+                host="127.0.0.1",
+                port=3306,
+                database="arkana",
+                user="arkana",
+                password="secret",
+            )
+        )
+        auth_user = AuthUser(
+            user_id="root-user",
+            user_name="root",
+            user_role="root",
+            user_storage_db_id=None,
+            supabase_user_id="supabase-root",
+            supabase_email="root@example.com",
+        )
+
+        with patch.object(ArkanaMainDB, "get_user_by_login_identifier", return_value=auth_user) as get_user:
+            with patch.object(ArkanaMainDB, "_get_api_password", side_effect=[None, "pw123"]) as get_password:
+                user = main_db.authenticate_api_user("root@example.com", "pw123")
+
+        self.assertEqual(user, auth_user)
+        get_user.assert_called_once_with("root@example.com")
+        self.assertEqual(get_password.call_args_list[0].args, ("root@example.com",))
+        self.assertEqual(get_password.call_args_list[1].args, ("root",))
+
+    def test_normalize_db_connection_payload_maps_supabase_to_supabase_server(self) -> None:
+        normalized = ArkanaMainDB._normalize_db_connection_payload(
+            {
+                "user_group": 0,
+                "owner": "system",
+                "db_type": "Supabase",
+                "url": "https://example.supabase.co",
+            }
+        )
+
+        self.assertEqual(normalized["data_source_type"], "db")
+        self.assertEqual(normalized["data_source_subtype"], "supabase_db")
+        self.assertEqual(normalized["server_key"], "supabase")
+        self.assertEqual(normalized["server_type"], "api")
+        self.assertEqual(normalized["connection_kind"], "url")
+
+
 class AmezitUserObjectAuthCacheTests(unittest.TestCase):
+    def test_authenticate_uses_supabase_role_for_auth_user(self) -> None:
+        config = AmezitSupabaseConfig(
+            url="https://example.supabase.co",
+            anon_key="anon-key",
+            service_role_key="service-role-key",
+            timeout_seconds=5.0,
+            ca_bundle=None,
+            insecure_ssl=False,
+        )
+        service = MagicMock()
+        service.authenticate_user.return_value = {
+            "access_token": "token",
+            "user": {"id": "user-123", "email": "root@example.com"},
+        }
+        service.current_user_role.return_value = "root"
+
+        with patch.object(AmezitSupabaseService, "from_config", return_value=service):
+            user = AmezitUserObject.authenticate(
+                main_db=MagicMock(),
+                username="root@example.com",
+                password="secret",
+                config=config,
+            )
+
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(user.user_role, "root")
+        service.current_user_role.assert_called_once_with(access_token="token")
+
+    def test_from_access_token_uses_supabase_role_for_auth_user(self) -> None:
+        config = AmezitSupabaseConfig(
+            url="https://example.supabase.co",
+            anon_key="anon-key",
+            service_role_key="service-role-key",
+            timeout_seconds=5.0,
+            ca_bundle=None,
+            insecure_ssl=False,
+        )
+        service = MagicMock()
+        service.get_authenticated_user.return_value = {"id": "user-123", "email": "root@example.com"}
+        service.current_user_role.return_value = "root"
+
+        with patch.object(AmezitSupabaseService, "from_config", return_value=service):
+            user = AmezitUserObject.from_access_token(
+                main_db=MagicMock(),
+                access_token="token",
+                config=config,
+            )
+
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(user.user_role, "root")
+        service.current_user_role.assert_called_once_with(access_token="token")
+
     def test_has_effective_auth_uses_buffered_payload_per_user_object(self) -> None:
         service = MagicMock()
         service.get_user_auth.return_value = {"project.read": 2, "project.admin": 1}
@@ -442,8 +542,50 @@ class AmezitUserObjectAuthCacheTests(unittest.TestCase):
 
         service.get_user_auth.assert_called_once_with(user_id="user-123", access_token="token")
 
+    def test_root_user_overrides_all_auth_objects_and_classes(self) -> None:
+        user = AmezitUserObject(
+            main_db=MagicMock(),
+            auth=AuthUser(
+                user_id="user-123",
+                user_name="root@example.com",
+                user_role="root",
+                user_storage_db_id=None,
+                supabase_user_id="user-123",
+                supabase_email="root@example.com",
+            ),
+            supabase_user_id="user-123",
+            supabase_email="root@example.com",
+            supabase_access_token="token",
+        )
+
+        with patch.object(AmezitUserObject, "_require_service") as require_service:
+            self.assertTrue(user.has_effective_auth("api.notes.create", required_value=99))
+            self.assertTrue(user.has_auth_class_assignment("api.notes"))
+
+        require_service.assert_not_called()
+
 
 class UserManagerCacheTests(unittest.TestCase):
+    def test_email_login_falls_back_to_local_api_user(self) -> None:
+        main_db = MagicMock()
+        local_auth = AuthUser(
+            user_id="root-user",
+            user_name="root@example.com",
+            user_role="root",
+            user_storage_db_id=None,
+        )
+        main_db.authenticate_api_user.return_value = local_auth
+        manager = UserManager(main_db=main_db)
+
+        with patch.object(UserManager, "_authenticate_supabase_user", return_value=None) as supabase_auth:
+            user = manager.authenticate("root@example.com", "secret")
+
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(user.user_role, "root")
+        supabase_auth.assert_called_once_with("root@example.com", "secret")
+        main_db.authenticate_api_user.assert_called_once_with("root@example.com", "secret")
+
     def test_reload_user_buffer_removes_cached_entries_for_user(self) -> None:
         manager = UserManager(main_db=MagicMock())
         manager._auth_cache = {
@@ -509,6 +651,15 @@ class RouteAuthTests(unittest.TestCase):
 
         user.has_auth_class_assignment.assert_called_once_with("api.user")
         user.has_effective_auth.assert_called_once_with("api.user.usage.read", required_value=1)
+
+    def test_require_route_auth_allows_root_without_auth_checks(self) -> None:
+        user = MagicMock(spec=ArkanaUser)
+        user.user_role = "root"
+
+        require_route_auth(user, "get_user_usage")
+
+        user.has_auth_class_assignment.assert_not_called()
+        user.has_effective_auth.assert_not_called()
 
 
 if __name__ == "__main__":

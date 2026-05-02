@@ -41,8 +41,12 @@ class UserManager:
 
         if self._is_email_login(username):
             user = self._authenticate_supabase_user(username, password)
+            if user is None:
+                user = self._authenticate_arkana_user(username, password)
         elif username.startswith("amezit-"):
             user = self._authenticate_supabase_user(username, password)
+            if user is None:
+                user = self._authenticate_arkana_user(username, password)
         else:
             user = self._authenticate_arkana_user(username, password)
 

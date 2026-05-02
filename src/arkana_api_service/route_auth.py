@@ -67,6 +67,8 @@ ROUTE_AUTH_SPECS: dict[str, RouteAuthSpec] = {
 
 
 def require_route_auth(current_user: ArkanaUser, route_name: str) -> None:
+    if getattr(current_user, "user_role", "") == "root":
+        return
     spec = ROUTE_AUTH_SPECS[route_name]
     if not current_user.has_auth_class_assignment(spec.auth_class):
         raise HTTPException(

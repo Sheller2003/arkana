@@ -29,6 +29,22 @@ class ArkanaNotes(Arkana_Object_Interface):
         if isinstance(chapters, list):
             self.chapters = [dict(chapter) for chapter in chapters if isinstance(chapter, dict)]
 
+    def _has_table(self, table_name: str) -> bool:
+        try:
+            _, cursor = self._ensure_model_cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = %s
+                """,
+                (table_name,),
+            )
+            row = cursor.fetchone()
+            return (row is not None) and int(row[0]) > 0
+        except Exception:
+            return False
+
     def _header_table_name(self) -> str:
         if not self._has_table("arkana_notes_header"):
             raise RuntimeError("Required table 'arkana_notes_header' not found")

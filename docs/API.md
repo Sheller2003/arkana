@@ -30,6 +30,13 @@ Hinweise:
 
 ## Standard-Objekte
 
+Typgruppen:
+- `arkana_object`: inhaltliche Arkana-Objekte wie `report` und `ark_notes`
+- `arkana_server`: servernahe Typen wie `api`, `api_docu`, `cli_connection`
+- `arkana_server_connection`: Verbindungsobjekte zwischen Arkana-Server-Komponenten
+
+Siehe auch: [arkana_type_groups.md](/Users/sheller2003/PycharmProjects/arkanaMDD/docs/arkana_type_groups.md)
+
 ### Report
 
 Felder:
@@ -825,6 +832,21 @@ Request-Felder:
 - `default_user`
 - `admin_user`
 - `db_type`
+- `data_source_type`
+- `data_source_subtype`
+- `data_source_key`
+- `data_source_label`
+- `server_key`
+- `server_type`
+- `server_label`
+- `connection_kind`
+- `auth_mode`
+- `metadata_json`
+
+Hinweise:
+- Bestehende DB-Connections werden jetzt als Teil eines groesseren System-Oekosystems modelliert.
+- Beim Anlegen einer DB-Connection werden bei Bedarf automatisch verknuepfte Eintraege fuer `arkana_server`, `arkana_server_connection` und `arkana_data_source` erzeugt.
+- Fuer `data_source_subtype = "supabase_db"` wird der zugehoerige Server automatisch auf `server_key = "supabase"` normalisiert, falls kein eigener `server_key` angegeben ist.
 
 ### `GET /db_connection/personal_user/?db_id=<id>`
 

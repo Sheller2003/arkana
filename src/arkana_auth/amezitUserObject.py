@@ -55,6 +55,8 @@ class AmezitUserObject(ArkanaUser):
         auth_user = cls._resolve_arkana_user(
             supabase_user_id=supabase_user_id,
             email=supabase_email,
+            service=service,
+            access_token=access_token if isinstance(access_token, str) else None,
         )
         return cls(
             main_db=main_db,
@@ -88,6 +90,8 @@ class AmezitUserObject(ArkanaUser):
         auth_user = cls._resolve_arkana_user(
             supabase_user_id=supabase_user_id,
             email=supabase_email,
+            service=service,
+            access_token=access_token,
         )
         return cls(
             main_db=main_db,
@@ -98,11 +102,25 @@ class AmezitUserObject(ArkanaUser):
         )
 
     @staticmethod
-    def _resolve_arkana_user(*, supabase_user_id: str, email: str) -> AuthUser:
+    def _resolve_arkana_user(
+        *,
+        supabase_user_id: str,
+        email: str,
+        service: AmezitSupabaseService | None = None,
+        access_token: str | None = None,
+    ) -> AuthUser:
+        user_role = "viewer"
+        if service is not None and access_token:
+            try:
+                resolved_role = service.current_user_role(access_token=access_token)
+            except SupabaseClientError:
+                resolved_role = None
+            if resolved_role:
+                user_role = str(resolved_role)
         return AuthUser(
             user_id=supabase_user_id,
             user_name=email,
-            user_role="viewer",
+            user_role=user_role,
             user_storage_db_id=None,
             supabase_user_id=supabase_user_id,
             supabase_email=email,
@@ -218,12 +236,16 @@ class AmezitUserObject(ArkanaUser):
         return self._auth_payload_cache
 
     def has_effective_auth(self, auth_key: str, required_value: int = 1) -> bool:
+        if self.user_role == "root":
+            return True
         if not self.supabase_access_token or not self.supabase_user_id:
             return False
         self._ensure_auth_cache_loaded()
         return self._effective_auth_cache.get(str(auth_key), 0) >= int(required_value)
 
     def has_auth_class_assignment(self, auth_class: str) -> bool:
+        if self.user_role == "root":
+            return True
         if not self.supabase_access_token or not self.supabase_user_id:
             return False
         self._ensure_auth_cache_loaded()

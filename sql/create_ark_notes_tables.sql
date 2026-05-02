@@ -1,13 +1,34 @@
 USE arkana;
 
 CREATE TABLE IF NOT EXISTS arkana_type (
-  type_key VARCHAR(16) NOT NULL,
+  type_key VARCHAR(64) NOT NULL,
+  type_group VARCHAR(32) NOT NULL DEFAULT 'arkana_object',
   type_description VARCHAR(200) NULL,
   PRIMARY KEY (type_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO arkana_type (type_key, type_description) VALUES
-  ('ark_notes', 'Notes/Notion-like page object');
+SET @has_arkana_type_group := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'arkana_type'
+    AND COLUMN_NAME = 'type_group'
+);
+SET @sql_add_arkana_type_group := IF(
+  @has_arkana_type_group = 0,
+  'ALTER TABLE arkana_type ADD COLUMN type_group VARCHAR(32) NOT NULL DEFAULT ''arkana_object'' AFTER type_key',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql_add_arkana_type_group;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+INSERT IGNORE INTO arkana_type (type_key, type_group, type_description) VALUES
+  ('ark_notes', 'arkana_object', 'Notes/Notion-like page object');
+
+UPDATE arkana_type
+SET type_group = 'arkana_object'
+WHERE type_key = 'ark_notes' AND (type_group IS NULL OR type_group = '');
 
 CREATE TABLE IF NOT EXISTS arkana_notes_header (
   arkana_id BIGINT NOT NULL,

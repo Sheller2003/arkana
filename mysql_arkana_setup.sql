@@ -29,6 +29,115 @@ INSERT IGNORE INTO arkana_user (
 ) VALUES
   ('system', 'system', 'root');
 
+CREATE TABLE IF NOT EXISTS arkana_data_source_type (
+  type_key VARCHAR(64) NOT NULL,
+  parent_type_key VARCHAR(64) NULL,
+  type_description VARCHAR(200) NULL,
+  PRIMARY KEY (type_key),
+  KEY idx_arkana_data_source_type_parent (parent_type_key),
+  CONSTRAINT fk_arkana_data_source_type_parent
+    FOREIGN KEY (parent_type_key) REFERENCES arkana_data_source_type(type_key)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO arkana_data_source_type (type_key, parent_type_key, type_description) VALUES
+  ('file_system', NULL, 'Filesystem data source'),
+  ('db', NULL, 'Database data source'),
+  ('supabase_db', 'db', 'Supabase database data source'),
+  ('webstorage', NULL, 'Web-based storage data source'),
+  ('notion', 'webstorage', 'Notion workspace data source'),
+  ('confluence', 'webstorage', 'Confluence space data source'),
+  ('api_stream', NULL, 'API stream data source');
+
+CREATE TABLE IF NOT EXISTS arkana_server (
+  server_id BIGINT NOT NULL AUTO_INCREMENT,
+  user_group BIGINT NOT NULL DEFAULT 0,
+  owner VARCHAR(120) NOT NULL,
+  server_key VARCHAR(120) NOT NULL,
+  server_type VARCHAR(64) NOT NULL DEFAULT 'api',
+  server_label VARCHAR(200) NULL,
+  server_description TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (server_id),
+  KEY idx_arkana_server_user_group (user_group),
+  KEY idx_arkana_server_owner (owner),
+  KEY idx_arkana_server_type (server_type),
+  CONSTRAINT fk_arkana_server_owner
+    FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS arkana_server_connection (
+  server_connection_id BIGINT NOT NULL AUTO_INCREMENT,
+  user_group BIGINT NOT NULL DEFAULT 0,
+  owner VARCHAR(120) NOT NULL,
+  server_id BIGINT NOT NULL,
+  connection_kind VARCHAR(32) NOT NULL DEFAULT 'url',
+  url VARCHAR(255) NULL,
+  ip VARCHAR(255) NULL,
+  auth_mode VARCHAR(64) NULL,
+  metadata_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (server_connection_id),
+  KEY idx_arkana_server_connection_user_group (user_group),
+  KEY idx_arkana_server_connection_owner (owner),
+  KEY idx_arkana_server_connection_server (server_id),
+  CONSTRAINT fk_arkana_server_connection_owner
+    FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_arkana_server_connection_server
+    FOREIGN KEY (server_id) REFERENCES arkana_server(server_id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS arkana_data_source (
+  data_source_id BIGINT NOT NULL AUTO_INCREMENT,
+  user_group BIGINT NOT NULL DEFAULT 0,
+  owner VARCHAR(120) NOT NULL,
+  data_source_type VARCHAR(64) NOT NULL,
+  data_source_subtype VARCHAR(64) NULL,
+  data_source_key VARCHAR(120) NULL,
+  data_source_label VARCHAR(200) NULL,
+  server_id BIGINT NOT NULL,
+  server_connection_id BIGINT NOT NULL,
+  metadata_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (data_source_id),
+  KEY idx_arkana_data_source_user_group (user_group),
+  KEY idx_arkana_data_source_owner (owner),
+  KEY idx_arkana_data_source_type (data_source_type),
+  KEY idx_arkana_data_source_subtype (data_source_subtype),
+  KEY idx_arkana_data_source_server (server_id),
+  KEY idx_arkana_data_source_server_connection (server_connection_id),
+  CONSTRAINT fk_arkana_data_source_owner
+    FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_arkana_data_source_type
+    FOREIGN KEY (data_source_type) REFERENCES arkana_data_source_type(type_key)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_arkana_data_source_subtype
+    FOREIGN KEY (data_source_subtype) REFERENCES arkana_data_source_type(type_key)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_arkana_data_source_server
+    FOREIGN KEY (server_id) REFERENCES arkana_server(server_id)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_arkana_data_source_server_connection
+    FOREIGN KEY (server_connection_id) REFERENCES arkana_server_connection(server_connection_id)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS db_connection (
   db_con_id BIGINT NOT NULL AUTO_INCREMENT,
   user_group BIGINT NOT NULL DEFAULT 0,
@@ -39,14 +148,32 @@ CREATE TABLE IF NOT EXISTS db_connection (
   default_user VARCHAR(120) NULL,
   admin_user VARCHAR(120) NULL,
   db_type ENUM('MySQL', 'Supabase', 'PostgreSQL') NOT NULL,
+  data_source_id BIGINT NULL,
+  server_id BIGINT NULL,
+  server_connection_id BIGINT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (db_con_id),
   KEY idx_db_connection_user_group (user_group),
   KEY idx_db_connection_owner (owner),
+  KEY idx_db_connection_data_source (data_source_id),
+  KEY idx_db_connection_server (server_id),
+  KEY idx_db_connection_server_connection (server_connection_id),
   CONSTRAINT fk_db_connection_owner
     FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
     ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_db_connection_data_source
+    FOREIGN KEY (data_source_id) REFERENCES arkana_data_source(data_source_id)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_db_connection_server
+    FOREIGN KEY (server_id) REFERENCES arkana_server(server_id)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_db_connection_server_connection
+    FOREIGN KEY (server_connection_id) REFERENCES arkana_server_connection(server_connection_id)
+    ON DELETE SET NULL
     ON UPDATE CASCADE,
   CONSTRAINT chk_db_connection_url_or_ip
     CHECK (
@@ -64,12 +191,14 @@ CREATE TABLE IF NOT EXISTS db_schema (
   ip VARCHAR(255) NULL,
   db_name VARCHAR(150) NOT NULL,
   db_description TEXT NULL,
+  data_source_id BIGINT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (db_id),
   UNIQUE KEY uq_db_schema_connection_name (db_con_id, db_name),
   KEY idx_db_schema_user_group (user_group),
   KEY idx_db_schema_owner (owner),
+  KEY idx_db_schema_data_source (data_source_id),
   CONSTRAINT fk_db_schema_connection
     FOREIGN KEY (db_con_id) REFERENCES db_connection(db_con_id)
     ON DELETE CASCADE
@@ -77,6 +206,10 @@ CREATE TABLE IF NOT EXISTS db_schema (
   CONSTRAINT fk_db_schema_owner
     FOREIGN KEY (owner) REFERENCES arkana_user(user_id)
     ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_db_schema_data_source
+    FOREIGN KEY (data_source_id) REFERENCES arkana_data_source(data_source_id)
+    ON DELETE SET NULL
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -102,15 +235,41 @@ CREATE TABLE IF NOT EXISTS ark_db_personal_user (
 
 -- Types available for Arkana objects
 CREATE TABLE IF NOT EXISTS arkana_type (
-  type_key VARCHAR(16) NOT NULL,
+  type_key VARCHAR(64) NOT NULL,
+  type_group VARCHAR(32) NOT NULL DEFAULT 'arkana_object',
   type_description VARCHAR(200) NULL,
   PRIMARY KEY (type_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+SET @has_arkana_type_group := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'arkana_type'
+    AND COLUMN_NAME = 'type_group'
+);
+SET @sql_add_arkana_type_group := IF(
+  @has_arkana_type_group = 0,
+  'ALTER TABLE arkana_type ADD COLUMN type_group VARCHAR(32) NOT NULL DEFAULT ''arkana_object'' AFTER type_key',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql_add_arkana_type_group;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Seed basic types
-INSERT IGNORE INTO arkana_type (type_key, type_description) VALUES
-  ('board', 'Dashboard/Board object'),
-  ('ark_notes', 'Notes/Notion-like page object');
+INSERT IGNORE INTO arkana_type (type_key, type_group, type_description) VALUES
+  ('board', 'arkana_object', 'Dashboard/Board object'),
+  ('report', 'arkana_object', 'Report object'),
+  ('ark_notes', 'arkana_object', 'Notes/Notion-like page object'),
+  ('api', 'arkana_server', 'Arkana API server definition'),
+  ('api_docu', 'arkana_server', 'API documentation server object'),
+  ('cli_connection', 'arkana_server', 'CLI connection server object'),
+  ('arkana_server_connection', 'arkana_server_connection', 'Connection object between Arkana server entities');
+
+UPDATE arkana_type SET type_group = 'arkana_object' WHERE type_key IN ('board', 'report', 'ark_notes') AND (type_group IS NULL OR type_group = '');
+UPDATE arkana_type SET type_group = 'arkana_server' WHERE type_key IN ('api', 'api_docu', 'cli_connection') AND (type_group IS NULL OR type_group = '');
+UPDATE arkana_type SET type_group = 'arkana_server_connection' WHERE type_key = 'arkana_server_connection' AND (type_group IS NULL OR type_group = '');
 
 -- Ensure a connection and schema with id 0 exist for the main Arkana DB
 -- Note: We rely on NO_AUTO_VALUE_ON_ZERO set above to allow explicit 0 inserts.
@@ -128,7 +287,7 @@ INSERT IGNORE INTO db_schema (
 
 CREATE TABLE IF NOT EXISTS arkana_object (
   arkana_id BIGINT NOT NULL AUTO_INCREMENT,
-  arkana_type VARCHAR(16) NOT NULL,
+  arkana_type VARCHAR(64) NOT NULL,
   auth_group BIGINT NULL,
   object_key VARCHAR(100) NULL,
   description VARCHAR(100) NULL,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import json
 import os
 import secrets
 from typing import Any, Iterator
@@ -37,6 +38,14 @@ class DBConnectionRecord:
     default_user: str | None
     admin_user: str | None
     db_type: str
+    data_source_id: int | None = None
+    server_id: int | None = None
+    server_connection_id: int | None = None
+    data_source_type: str | None = None
+    data_source_subtype: str | None = None
+    server_key: str | None = None
+    server_type: str | None = None
+    connection_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +58,45 @@ class DBSchemaRecord:
     ip: str | None
     db_name: str
     db_description: str | None
+    data_source_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ArkanaServerRecord:
+    server_id: int
+    user_group: int
+    owner: str
+    server_key: str
+    server_type: str
+    server_label: str | None
+    server_description: str | None
+
+
+@dataclass(frozen=True)
+class ArkanaServerConnectionRecord:
+    server_connection_id: int
+    user_group: int
+    owner: str
+    server_id: int
+    connection_kind: str
+    url: str | None
+    ip: str | None
+    auth_mode: str | None
+    metadata_json: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class ArkanaDataSourceRecord:
+    data_source_id: int
+    user_group: int
+    owner: str
+    data_source_type: str
+    data_source_subtype: str | None
+    data_source_key: str | None
+    data_source_label: str | None
+    server_id: int
+    server_connection_id: int
+    metadata_json: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -85,12 +133,23 @@ class ArkanaMainDB:
             connection.close()
 
     def authenticate_api_user(self, username: str, password: str) -> AuthUser | None:
-        user = self.get_user_by_name(username)
+        user = self.get_user_by_login_identifier(username)
         if user is None:
             return None
 
-        stored_password = self._get_api_password(username)
-        if stored_password is None or not secrets.compare_digest(stored_password, password):
+        password_candidates: list[str] = []
+        for candidate in (username, user.user_name, user.supabase_email):
+            normalized = str(candidate).strip() if candidate is not None else ""
+            if normalized and normalized not in password_candidates:
+                password_candidates.append(normalized)
+
+        password_matches = False
+        for candidate in password_candidates:
+            stored_password = self._get_api_password(candidate)
+            if stored_password is not None and secrets.compare_digest(stored_password, password):
+                password_matches = True
+                break
+        if not password_matches:
             return None
 
         return user
@@ -130,24 +189,82 @@ class ArkanaMainDB:
         row = self._fetchone(query, (username,))
         return self._row_to_auth_user(row)
 
-    def get_db_schema(self, db_id: int) -> DBSchemaRecord | None:
+    def get_user_by_login_identifier(self, identifier: str) -> AuthUser | None:
         query = """
+            SELECT user_id, user_name, user_role, user_storage_db_id, supabase_user_id, supabase_email
+            FROM arkana_user
+            WHERE user_name = %s OR supabase_email = %s
+            LIMIT 1
+        """
+        row = self._fetchone(query, (identifier, identifier))
+        return self._row_to_auth_user(row)
+
+    def get_db_schema(self, db_id: int) -> DBSchemaRecord | None:
+        row = None
+        queries = [
+            """
+            SELECT db_id, db_con_id, user_group, owner, url, ip, db_name, db_description, data_source_id
+            FROM db_schema
+            WHERE db_id = %s
+            LIMIT 1
+            """,
+            """
             SELECT db_id, db_con_id, user_group, owner, url, ip, db_name, db_description
             FROM db_schema
             WHERE db_id = %s
             LIMIT 1
-        """
-        row = self._fetchone(query, (db_id,))
+            """,
+        ]
+        for query in queries:
+            try:
+                row = self._fetchone(query, (db_id,))
+                break
+            except Exception:
+                continue
         return self._row_to_schema(row)
 
     def get_db_connection(self, db_con_id: int) -> DBConnectionRecord | None:
-        query = """
+        row = None
+        queries = [
+            """
+            SELECT
+                c.db_con_id,
+                c.user_group,
+                c.owner,
+                c.url,
+                c.ip,
+                c.server_description,
+                c.default_user,
+                c.admin_user,
+                c.db_type,
+                c.data_source_id,
+                c.server_id,
+                c.server_connection_id,
+                ds.data_source_type,
+                ds.data_source_subtype,
+                s.server_key,
+                s.server_type,
+                sc.connection_kind
+            FROM db_connection AS c
+            LEFT JOIN arkana_data_source AS ds ON ds.data_source_id = c.data_source_id
+            LEFT JOIN arkana_server AS s ON s.server_id = c.server_id
+            LEFT JOIN arkana_server_connection AS sc ON sc.server_connection_id = c.server_connection_id
+            WHERE c.db_con_id = %s
+            LIMIT 1
+            """,
+            """
             SELECT db_con_id, user_group, owner, url, ip, server_description, default_user, admin_user, db_type
             FROM db_connection
             WHERE db_con_id = %s
             LIMIT 1
-        """
-        row = self._fetchone(query, (db_con_id,))
+            """,
+        ]
+        for query in queries:
+            try:
+                row = self._fetchone(query, (db_con_id,))
+                break
+            except Exception:
+                continue
         return self._row_to_connection(row)
 
     def get_db_with_connection(self, db_id: int) -> DBWithConnection | None:
@@ -311,47 +428,220 @@ class ArkanaMainDB:
         }
 
     def create_db_schema(self, payload: dict[str, Any]) -> DBSchemaRecord:
-        query = """
-            INSERT INTO db_schema (db_con_id, user_group, owner, url, ip, db_name, db_description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        values = (
-            payload["db_con_id"],
-            payload["user_group"],
-            payload["owner"],
-            payload.get("url"),
-            payload.get("ip"),
-            payload["db_name"],
-            payload.get("db_description"),
-        )
-        new_id = self._insert(query, values)
+        resolved_data_source_id = payload.get("data_source_id")
+        if resolved_data_source_id is None:
+            connection_record = self.get_db_connection(int(payload["db_con_id"]))
+            if connection_record is not None:
+                resolved_data_source_id = connection_record.data_source_id
+        try:
+            new_id = self._insert(
+                """
+                INSERT INTO db_schema (db_con_id, user_group, owner, url, ip, db_name, db_description, data_source_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    payload["db_con_id"],
+                    payload["user_group"],
+                    payload["owner"],
+                    payload.get("url"),
+                    payload.get("ip"),
+                    payload["db_name"],
+                    payload.get("db_description"),
+                    resolved_data_source_id,
+                ),
+            )
+        except Exception:
+            new_id = self._insert(
+                """
+                INSERT INTO db_schema (db_con_id, user_group, owner, url, ip, db_name, db_description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    payload["db_con_id"],
+                    payload["user_group"],
+                    payload["owner"],
+                    payload.get("url"),
+                    payload.get("ip"),
+                    payload["db_name"],
+                    payload.get("db_description"),
+                ),
+            )
         record = self.get_db_schema(new_id)
         if record is None:
             raise RuntimeError("Inserted db_schema record could not be reloaded")
         return record
 
     def create_db_connection(self, payload: dict[str, Any]) -> DBConnectionRecord:
-        query = """
-            INSERT INTO db_connection (
-                user_group, owner, url, ip, server_description, default_user, admin_user, db_type
+        normalized = self._normalize_db_connection_payload(payload)
+        try:
+            if normalized.get("server_id") is None:
+                normalized["server_id"] = self.create_arkana_server(normalized).server_id
+            if normalized.get("server_connection_id") is None:
+                normalized["server_connection_id"] = self.create_arkana_server_connection(normalized).server_connection_id
+            if normalized.get("data_source_id") is None:
+                normalized["data_source_id"] = self.create_data_source(normalized).data_source_id
+        except Exception:
+            normalized = dict(payload)
+
+        try:
+            new_id = self._insert(
+                """
+                INSERT INTO db_connection (
+                    user_group, owner, url, ip, server_description, default_user, admin_user, db_type,
+                    data_source_id, server_id, server_connection_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    normalized["user_group"],
+                    normalized["owner"],
+                    normalized.get("url"),
+                    normalized.get("ip"),
+                    normalized.get("server_description"),
+                    normalized.get("default_user"),
+                    normalized.get("admin_user"),
+                    normalized["db_type"],
+                    normalized.get("data_source_id"),
+                    normalized.get("server_id"),
+                    normalized.get("server_connection_id"),
+                ),
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        values = (
-            payload["user_group"],
-            payload["owner"],
-            payload.get("url"),
-            payload.get("ip"),
-            payload.get("server_description"),
-            payload.get("default_user"),
-            payload.get("admin_user"),
-            payload["db_type"],
-        )
-        new_id = self._insert(query, values)
+        except Exception:
+            new_id = self._insert(
+                """
+                INSERT INTO db_connection (
+                    user_group, owner, url, ip, server_description, default_user, admin_user, db_type
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    normalized["user_group"],
+                    normalized["owner"],
+                    normalized.get("url"),
+                    normalized.get("ip"),
+                    normalized.get("server_description"),
+                    normalized.get("default_user"),
+                    normalized.get("admin_user"),
+                    normalized["db_type"],
+                ),
+            )
         record = self.get_db_connection(new_id)
         if record is None:
             raise RuntimeError("Inserted db_connection record could not be reloaded")
         return record
+
+    def create_arkana_server(self, payload: dict[str, Any]) -> ArkanaServerRecord:
+        normalized = self._normalize_db_connection_payload(payload)
+        new_id = self._insert(
+            """
+            INSERT INTO arkana_server (
+                user_group, owner, server_key, server_type, server_label, server_description
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                normalized["user_group"],
+                normalized["owner"],
+                normalized["server_key"],
+                normalized["server_type"],
+                normalized.get("server_label"),
+                normalized.get("server_description"),
+            ),
+        )
+        return ArkanaServerRecord(
+            server_id=new_id,
+            user_group=int(normalized["user_group"]),
+            owner=str(normalized["owner"]),
+            server_key=str(normalized["server_key"]),
+            server_type=str(normalized["server_type"]),
+            server_label=str(normalized.get("server_label")) if normalized.get("server_label") is not None else None,
+            server_description=(
+                str(normalized.get("server_description")) if normalized.get("server_description") is not None else None
+            ),
+        )
+
+    def create_arkana_server_connection(self, payload: dict[str, Any]) -> ArkanaServerConnectionRecord:
+        normalized = self._normalize_db_connection_payload(payload)
+        if normalized.get("server_id") is None:
+            normalized["server_id"] = self.create_arkana_server(normalized).server_id
+        metadata_json = normalized.get("metadata_json")
+        metadata_text = json.dumps(metadata_json) if metadata_json is not None else None
+        new_id = self._insert(
+            """
+            INSERT INTO arkana_server_connection (
+                user_group, owner, server_id, connection_kind, url, ip, auth_mode, metadata_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                normalized["user_group"],
+                normalized["owner"],
+                normalized["server_id"],
+                normalized["connection_kind"],
+                normalized.get("url"),
+                normalized.get("ip"),
+                normalized.get("auth_mode"),
+                metadata_text,
+            ),
+        )
+        return ArkanaServerConnectionRecord(
+            server_connection_id=new_id,
+            user_group=int(normalized["user_group"]),
+            owner=str(normalized["owner"]),
+            server_id=int(normalized["server_id"]),
+            connection_kind=str(normalized["connection_kind"]),
+            url=str(normalized.get("url")) if normalized.get("url") is not None else None,
+            ip=str(normalized.get("ip")) if normalized.get("ip") is not None else None,
+            auth_mode=str(normalized.get("auth_mode")) if normalized.get("auth_mode") is not None else None,
+            metadata_json=metadata_json if isinstance(metadata_json, dict) else None,
+        )
+
+    def create_data_source(self, payload: dict[str, Any]) -> ArkanaDataSourceRecord:
+        normalized = self._normalize_db_connection_payload(payload)
+        if normalized.get("server_id") is None:
+            normalized["server_id"] = self.create_arkana_server(normalized).server_id
+        if normalized.get("server_connection_id") is None:
+            normalized["server_connection_id"] = self.create_arkana_server_connection(normalized).server_connection_id
+        metadata_json = normalized.get("metadata_json")
+        metadata_text = json.dumps(metadata_json) if metadata_json is not None else None
+        new_id = self._insert(
+            """
+            INSERT INTO arkana_data_source (
+                user_group, owner, data_source_type, data_source_subtype, data_source_key,
+                data_source_label, server_id, server_connection_id, metadata_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                normalized["user_group"],
+                normalized["owner"],
+                normalized["data_source_type"],
+                normalized.get("data_source_subtype"),
+                normalized.get("data_source_key"),
+                normalized.get("data_source_label"),
+                normalized["server_id"],
+                normalized["server_connection_id"],
+                metadata_text,
+            ),
+        )
+        return ArkanaDataSourceRecord(
+            data_source_id=new_id,
+            user_group=int(normalized["user_group"]),
+            owner=str(normalized["owner"]),
+            data_source_type=str(normalized["data_source_type"]),
+            data_source_subtype=(
+                str(normalized.get("data_source_subtype")) if normalized.get("data_source_subtype") is not None else None
+            ),
+            data_source_key=(
+                str(normalized.get("data_source_key")) if normalized.get("data_source_key") is not None else None
+            ),
+            data_source_label=(
+                str(normalized.get("data_source_label")) if normalized.get("data_source_label") is not None else None
+            ),
+            server_id=int(normalized["server_id"]),
+            server_connection_id=int(normalized["server_connection_id"]),
+            metadata_json=metadata_json if isinstance(metadata_json, dict) else None,
+        )
 
     def get_personal_user(self, db_id: int) -> PersonalUserRecord | None:
         query = """
@@ -554,6 +844,36 @@ class ArkanaMainDB:
         return f"db:{db_id}|shared:{db_user_name}"
 
     @staticmethod
+    def _normalize_db_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(payload)
+        db_type = str(normalized.get("db_type") or "MySQL")
+        data_source_type = str(normalized.get("data_source_type") or "db")
+        data_source_subtype = normalized.get("data_source_subtype")
+        if data_source_type == "db" and not data_source_subtype and db_type.lower() == "supabase":
+            data_source_subtype = "supabase_db"
+        normalized["data_source_type"] = data_source_type
+        normalized["data_source_subtype"] = (
+            str(data_source_subtype).strip() if data_source_subtype not in (None, "") else None
+        )
+        server_key = normalized.get("server_key")
+        if server_key in (None, ""):
+            if normalized["data_source_subtype"] == "supabase_db":
+                server_key = "supabase"
+            elif normalized.get("url"):
+                parsed = urlparse(str(normalized["url"]))
+                server_key = parsed.hostname or db_type.lower()
+            elif normalized.get("ip"):
+                server_key = str(normalized["ip"])
+            else:
+                server_key = db_type.lower()
+        normalized["server_key"] = str(server_key)
+        if normalized.get("server_type") in (None, ""):
+            normalized["server_type"] = "api"
+        if normalized.get("connection_kind") in (None, ""):
+            normalized["connection_kind"] = "url" if normalized.get("url") else ("ip" if normalized.get("ip") else "embedded")
+        return normalized
+
+    @staticmethod
     def _row_to_schema(row: tuple[Any, ...] | None) -> DBSchemaRecord | None:
         if row is None:
             return None
@@ -566,6 +886,7 @@ class ArkanaMainDB:
             ip=str(row[5]) if row[5] is not None else None,
             db_name=str(row[6]),
             db_description=str(row[7]) if row[7] is not None else None,
+            data_source_id=int(row[8]) if len(row) > 8 and row[8] is not None else None,
         )
 
     @staticmethod
@@ -582,6 +903,14 @@ class ArkanaMainDB:
             default_user=str(row[6]) if row[6] is not None else None,
             admin_user=str(row[7]) if row[7] is not None else None,
             db_type=str(row[8]),
+            data_source_id=int(row[9]) if len(row) > 9 and row[9] is not None else None,
+            server_id=int(row[10]) if len(row) > 10 and row[10] is not None else None,
+            server_connection_id=int(row[11]) if len(row) > 11 and row[11] is not None else None,
+            data_source_type=str(row[12]) if len(row) > 12 and row[12] is not None else None,
+            data_source_subtype=str(row[13]) if len(row) > 13 and row[13] is not None else None,
+            server_key=str(row[14]) if len(row) > 14 and row[14] is not None else None,
+            server_type=str(row[15]) if len(row) > 15 and row[15] is not None else None,
+            connection_kind=str(row[16]) if len(row) > 16 and row[16] is not None else None,
         )
 
     @staticmethod

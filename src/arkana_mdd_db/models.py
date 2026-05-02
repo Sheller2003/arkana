@@ -13,6 +13,7 @@ class CreateDBRequest(BaseModel):
     db_name: str
     db_description: str | None = None
     db_con_id: int
+    data_source_id: int | None = None
 
 
 class CreateDBConnectionRequest(BaseModel):
@@ -24,6 +25,19 @@ class CreateDBConnectionRequest(BaseModel):
     default_user: str | None = None
     admin_user: str | None = None
     db_type: str
+    data_source_type: str = "db"
+    data_source_subtype: str | None = None
+    data_source_key: str | None = None
+    data_source_label: str | None = None
+    server_key: str | None = None
+    server_type: str = "api"
+    server_label: str | None = None
+    connection_kind: str | None = None
+    auth_mode: str | None = None
+    metadata_json: dict[str, Any] | None = None
+    data_source_id: int | None = None
+    server_id: int | None = None
+    server_connection_id: int | None = None
 
 
 class PersonalUserRequest(BaseModel):

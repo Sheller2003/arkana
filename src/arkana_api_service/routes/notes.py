@@ -130,7 +130,7 @@ def create_notes(
     )
 
 
-@router.get("/notes/{object_id}/")
+@router.get("/notes/{object_id:int}/")
 def get_notes(
     object_id: int,
     current_user: ArkanaUser = Depends(get_current_user),
